@@ -1,0 +1,183 @@
+{
+  "$schema": "./models_information_spec.json",
+  "gpt-4o": {
+    "MaxTokens": 8192,
+    "MaxInputTokens": 128000,
+    "MaxOutputTokens": 16384,
+    "InputCostPerToken": 0.000005,
+    "OutputCostPerToken": 0.000015,
+    "AIProvider": "Openai",
+    "ModelType": "Chat",
+    "SupportsFunctionCalling": true,
+    "SupportsParallelFunctionCalling": true
+  },
+  "text-embedding-3-large": {
+    "MaxTokens": 8191,
+    "MaxInputTokens": 8191,
+    "MaxOutputTokens": 8191,
+    "OutputVectorSize": 3072,
+    "InputCostPerToken": 0.00000013,
+    "OutputCostPerToken": 0.000000,
+    "AIProvider": "Openai",
+    "ModelType": "Embedding",
+    "EmbeddingDimensions": 1024
+  },
+  "text-embedding-3-small": {
+    "MaxTokens": 8191,
+    "MaxInputTokens": 8191,
+    "MaxOutputTokens": 8191,
+    "OutputVectorSize": 1536,
+    "InputCostPerToken": 0.00000002,
+    "OutputCostPerToken": 0.000000,
+    "AIProvider": "Openai",
+    "ModelType": "Embedding",
+    "EmbeddingDimensions": 512
+  },
+  "azure/gpt-4o": {
+    "MaxTokens": 8192,
+    "MaxOutputTokens": 16384,
+    "MaxInputTokens": 128000,
+    "InputCostPerToken": 0.000005,
+    "OutputCostPerToken": 0.000015,
+    "AIProvider": "Azure",
+    "ModelType": "Chat",
+    "SupportsFunctionCalling": true,
+    "SupportsParallelFunctionCalling": true
+  },
+  "azure/text-embedding-3-large": {
+    "MaxTokens": 8191,
+    "MaxInputTokens": 8191,
+    "MaxOutputTokens": 8191,
+    "InputCostPerToken": 0.00000013,
+    "OutputCostPerToken": 0.000000,
+    "AIProvider": "Azure",
+    "ModelType": "Embedding",
+    "EmbeddingDimensions": 1024
+  },
+  "azure/text-embedding-3-small": {
+    "MaxTokens": 8191,
+    "MaxInputTokens": 8191,
+    "MaxOutputTokens": 8191,
+    "InputCostPerToken": 0.00000002,
+    "OutputCostPerToken": 0.000000,
+    "AIProvider": "Azure",
+    "ModelType": "Embedding",
+    "EmbeddingDimensions": 512
+  },
+  "ollama/codegeex4": {
+    "MaxTokens": 32768,
+    "MaxInputTokens": 32768,
+    "MaxOutputTokens": 8192,
+    "InputCostPerToken": 0.0,
+    "OutputCostPerToken": 0.0,
+    "AIProvider": "Ollama",
+    "ModelType": "Chat",
+    "SupportsFunctionCalling": false
+  },
+  "ollama/deepseek-coder-v2-instruct": {
+    "MaxTokens": 32768,
+    "MaxInputTokens": 32768,
+    "MaxOutputTokens": 8192,
+    "InputCostPerToken": 0.0,
+    "OutputCostPerToken": 0.0,
+    "AIProvider": "Ollama",
+    "ModelType": "Chat",
+    "SupportsFunctionCalling": true
+  },
+  "ollama/deepseek-coder-v2-lite-instruct": {
+    "MaxTokens": 32768,
+    "MaxInputTokens": 32768,
+    "MaxOutputTokens": 8192,
+    "InputCostPerToken": 0.0,
+    "OutputCostPerToken": 0.0,
+    "AIProvider": "Ollama",
+    "ModelType": "Chat",
+    "SupportsFunctionCalling": true
+  },
+  "ollama/deepseek-coder-v2-lite-base": {
+    "MaxTokens": 8192,
+    "MaxInputTokens": 8192,
+    "MaxOutputTokens": 8192,
+    "InputCostPerToken": 0.0,
+    "OutputCostPerToken": 0.0,
+    "AIProvider": "Ollama",
+    "ModelType": "Chat",
+    "SupportsFunctionCalling": true
+  },
+  "ollama/llama3": {
+    "MaxTokens": 8192,
+    "MaxInputTokens": 8192,
+    "MaxOutputTokens": 8192,
+    "InputCostPerToken": 0.0,
+    "OutputCostPerToken": 0.0,
+    "AIProvider": "Ollama",
+    "ModelType": "Chat"
+  },
+  "ollama/llama3:8b": {
+    "MaxTokens": 8192,
+    "MaxInputTokens": 8192,
+    "MaxOutputTokens": 8192,
+    "InputCostPerToken": 0.0,
+    "OutputCostPerToken": 0.0,
+    "AIProvider": "Ollama",
+    "ModelType": "Chat"
+  },
+  "ollama/llama3:70b": {
+    "MaxTokens": 8192,
+    "MaxInputTokens": 8192,
+    "MaxOutputTokens": 8192,
+    "InputCostPerToken": 0.0,
+    "OutputCostPerToken": 0.0,
+    "AIProvider": "Ollama",
+    "ModelType": "Chat"
+  },
+  "ollama/llama3.1": {
+    "MaxTokens": 32768,
+    "MaxInputTokens": 8192,
+    "MaxOutputTokens": 8192,
+    "InputCostPerToken": 0.0,
+    "OutputCostPerToken": 0.0,
+    "AIProvider": "Ollama",
+    "ModelType": "Chat",
+    "SupportsFunctionCalling": true
+  },
+  "ollama/llama3.2": {
+    "MaxTokens": 128000,
+    "MaxInputTokens": 128000,
+    "MaxOutputTokens": 4000,
+    "InputCostPerToken": 0.0,
+    "OutputCostPerToken": 0.0,
+    "AIProvider": "Ollama",
+    "ModelType": "Chat",
+    "SupportsFunctionCalling": true
+  },
+  "ollama/codellama": {
+    "MaxTokens": 4096,
+    "MaxInputTokens": 4096,
+    "MaxOutputTokens": 4096,
+    "InputCostPerToken": 0.0,
+    "OutputCostPerToken": 0.0,
+    "AIProvider": "Ollama",
+    "ModelType": "Chat"
+  },
+  "ollama/nomic-embed-text": {
+    "MaxTokens": 8192,
+    "MaxInputTokens": 8192,
+    "MaxOutputTokens": 8192,
+    "InputCostPerToken": 0.0,
+    "OutputCostPerToken": 0.0,
+    "AIProvider": "Ollama",
+    "ModelType": "Embedding",
+    "EmbeddingDimensions": 512
+  },
+  "ollama/mxbai-embed-large": {
+    "MaxTokens": 8192,
+    "MaxInputTokens": 8192,
+    "MaxOutputTokens": 8192,
+    "InputCostPerToken": 0.0,
+    "OutputCostPerToken": 0.0,
+    "AIProvider": "Ollama",
+    "ModelType": "Embedding",
+    "EmbeddingDimensions": 1024
+  }
+}

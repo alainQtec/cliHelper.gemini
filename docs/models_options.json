@@ -1,0 +1,87 @@
+{
+  "$schema": "./models_options_spec.json",
+  "gpt-4o": {
+    "CodeDiffType": "CodeBlockDiff",
+    "CodeAssistType": "Embedding",
+    "Temperature": 0.2
+  },
+  "text-embedding-3-large": {
+    "Threshold": 0.5,
+    "Temperature": 0.2
+  },
+  "text-embedding-3-small": {
+    "Threshold": 0.5,
+    "Temperature": 0.2
+  },
+  "azure/gpt-4o": {
+    "CodeDiffType": "CodeBlockDiff",
+    "CodeAssistType": "Embedding",
+    "Temperature": 0.2
+  },
+  "azure/text-embedding-3-large": {
+    "Threshold": 0.3,
+    "Temperature": 0.2
+  },
+  "azure/text-embedding-3-small": {
+    "Threshold": 0.5,
+    "Temperature": 0.2
+  },
+  "ollama/codegeex4": {
+    "CodeDiffType": "CodeBlockDiff",
+    "CodeAssistType": "Embedding",
+    "Temperature": 0.2
+  },
+  "ollama/deepseek-coder-v2-instruct": {
+    "CodeDiffType": "CodeBlockDiff",
+    "CodeAssistType": "Embedding",
+    "Temperature": 0.2
+  },
+  "ollama/deepseek-coder-v2-lite-instruct": {
+    "CodeDiffType": "CodeBlockDiff",
+    "CodeAssistType": "Embedding",
+    "Temperature": 0.2
+  },
+  "ollama/deepseek-coder-v2-lite-base": {
+    "CodeDiffType": "CodeBlockDiff",
+    "CodeAssistType": "Embedding",
+    "Temperature": 0.2
+  },
+  "ollama/llama3.1": {
+    "CodeDiffType": "CodeBlockDiff",
+    "CodeAssistType": "Embedding",
+    "Temperature": 0.2
+  },
+  "ollama/nomic-embed-text": {
+    "Threshold": 0.4,
+    "Temperature": 0.2
+  },
+  "ollama/mxbai-embed-large": {
+    "Threshold": 0.5,
+    "Temperature": 0.2
+  },
+  "ollama/llama3": {
+    "CodeDiffType": "CodeBlockDiff",
+    "CodeAssistType": "Embedding",
+    "Temperature": 0.2
+  },
+  "ollama/llama3:8b": {
+    "CodeDiffType": "CodeBlockDiff",
+    "CodeAssistType": "Embedding",
+    "Temperature": 0.2
+  },
+  "ollama/llama3:70b": {
+    "CodeDiffType": "CodeBlockDiff",
+    "CodeAssistType": "Embedding",
+    "Temperature": 0.2
+  },
+  "ollama/llama3.2": {
+    "CodeDiffType": "CodeBlockDiff",
+    "CodeAssistType": "Embedding",
+    "Temperature": 0.2
+  },
+  "ollama/codellama": {
+    "CodeDiffType": "CodeBlockDiff",
+    "CodeAssistType": "Embedding",
+    "Temperature": 0.2
+  }
+}

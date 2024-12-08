@@ -1,0 +1,92 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Provider Configuration Schema",
+  "type": "object",
+  "additionalProperties": {
+    "type": "object",
+    "description": "A fully qualified model name with AI provider type and '/' prefix (e.g., 'ollama/llama3.1').",
+    "properties": {
+      "Enabled": {
+        "type": "boolean",
+        "description": "Indicates whether the model is Enabled (true) or disabled (false).",
+        "default": true
+      },
+      "MaxTokens": {
+        "type": "integer",
+        "description": "The maximum number of tokens for the provider",
+        "default": 8192
+      },
+      "MaxInputTokens": {
+        "type": "integer",
+        "description": "Maximum input tokens allowed by the provider; defaults to MaxTokens",
+        "default": 8192
+      },
+      "MaxOutputTokens": {
+        "type": "integer",
+        "description": "Maximum output tokens allowed by the provider; defaults to MaxTokens",
+        "default": 8192
+      },
+      "InputCostPerToken": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Cost per input token",
+        "default": 0.0
+      },
+      "OutputCostPerToken": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Cost per output token",
+        "default": 0.0
+      },
+      "OutputVectorSize": {
+        "type": "number",
+        "minimum": 0,
+        "description": "Output vector size",
+        "default": 0.0
+      },
+      "AIProvider": {
+        "type": "string",
+        "description": "Name of the AIProvider, must match a known AIProvider (e.g., 'ollama')",
+        "enum": ["Ollama", "Openai", "Azure", "Anthropic"]
+      },
+      "ModelType": {
+        "type": "string",
+        "enum": [
+          "Chat",
+          "Embedding"
+        ],
+        "description": "Operational mode for the AIProvider (e.g., chat, completion)"
+      },
+      "SupportsFunctionCalling": {
+        "type": "boolean",
+        "description": "Indicates if the AIProvider supports function calling",
+        "default": false
+      },
+      "SupportsParallelFunctionCalling": {
+        "type": "boolean",
+        "description": "Indicates if parallel function calling is supported",
+        "default": false
+      },
+      "SupportsVision": {
+        "type": "boolean",
+        "description": "Indicates if vision input/output is supported",
+        "default": false
+      },
+      "EmbeddingDimensions": {
+        "type": "integer",
+        "minimum": 1,
+        "description": "Dimensions of the output embedding vector, applicable only for embedding mode",
+        "default": 512
+      }
+    },
+    "required": [
+      "MaxTokens",
+      "MaxInputTokens",
+      "InputCostPerToken",
+      "OutputCostPerToken",
+      "AIProvider",
+      "ModelType"
+    ],
+    "additionalProperties": false
+  }
+}
