@@ -1,17 +1,17 @@
-# [cliHelper.llmagent](https://www.powershellgallery.com/packages/cliHelper.llmagent)
+# [cliHelper.gemini](https://www.powershellgallery.com/packages/cliHelper.gemini)
 
 🔥 Blazingly fast PowerShell thingy that stonks up your terminal game.
 
 ## Usage
 
 ```PowerShell
-Install-Module cliHelper.llmagent
+Install-Module cliHelper.gemini
 ```
 
 then
 
 ```PowerShell
-Import-Module cliHelper.llmagent
+Import-Module cliHelper.gemini
 # do stuff here.
 ```
 

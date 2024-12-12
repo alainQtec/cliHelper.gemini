@@ -1,10 +1,10 @@
 
 # .SYNOPSIS
-#   cliHelper.llmagent build script
+#   cliHelper.gemini build script
 # .DESCRIPTION
 #   A build script that uses a builder module 🗿
 # .LINK
-#   https://github.com/alainQtec/cliHelper.llmagent/blob/main/build.ps1
+#   https://github.com/alainQtec/cliHelper.gemini/blob/main/build.ps1
 # .NOTES
 #   Author   : Alain Herve
 #   Copyright: Copyright © 2024 Alain Herve. All rights reserved.
