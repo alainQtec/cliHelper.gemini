@@ -41,12 +41,6 @@ enum ChatRole {
   Model     # System
 }
 
-enum ChatExitReasons {
-  No_Internet
-  Failed_HttpRequest
-  Empty_API_key
-}
-
 enum ActionType {
   CHAT
   FACT
@@ -66,37 +60,41 @@ enum HarmCategory {
 # Reason that a prompt was blocked.
 enum BlockReason {
   BLOCKED_REASON_UNSPECIFIED # A blocked reason was not specified.
-  SAFETY # Content was blocked by safety settings.
-  OTHER # Content was blocked, but the reason is uncategorized.
+  SAFETY                     # Content was blocked by safety settings.
+  OTHER                      # Content was blocked, but the reason is uncategorized.
 }
 
 # Threshhold above which a prompt or candidate will be blocked.
 enum HarmBlockThreshold {
   HARM_BLOCK_THRESHOLD_UNSPECIFIED # Threshold is unspecified.
-  BLOCK_LOW_AND_ABOVE # Content with NEGLIGIBLE will be allowed.
-  BLOCK_MEDIUM_AND_ABOVE # Content with NEGLIGIBLE and LOW will be allowed.
-  BLOCK_ONLY_HIGH # Content with NEGLIGIBLE, LOW, and MEDIUM will be allowed.
-  BLOCK_NONE # All content will be allowed.
+  BLOCK_LOW_AND_ABOVE              # Content with NEGLIGIBLE will be allowed.
+  BLOCK_MEDIUM_AND_ABOVE           # Content with NEGLIGIBLE and LOW will be allowed.
+  BLOCK_ONLY_HIGH                  # Content with NEGLIGIBLE, LOW, and MEDIUM will be allowed.
+  BLOCK_NONE                       # All content will be allowed.
 }
 
 
 # Probability that a prompt or candidate matches a harm category.
 enum HarmProbability {
   HARM_PROBABILITY_UNSPECIFIED # Probability is unspecified.
-  NEGLIGIBLE # Content has a negligible chance of being unsafe.
-  LOW # Content has a low chance of being unsafe.
-  MEDIUM # Content has a medium chance of being unsafe.
-  HIGH # Content has a high chance of being unsafe.
+  NEGLIGIBLE                   # Content has a negligible chance of being unsafe.
+  LOW                          # Content has a low chance of being unsafe.
+  MEDIUM                       # Content has a medium chance of being unsafe.
+  HIGH                         # Content has a high chance of being unsafe.
 }
 
 # Reason that a candidate finished.
 enum FinishReason {
-  FinishReason_UNSPECIFIED #Default value. This value is unused.
-  STOP #Natural stop point of the model or provided stop sequence.
-  MAX_TOKENS #The maximum number of tokens as specified in the request was reached.
-  SAFETY # The candidate content was flagged for safety reasons.
-  RECITATION # The candidate content was flagged for recitation reasons.
-  OTHER # Unknown reason.
+  FinishReason_UNSPECIFIED # Default value. This value is unused.
+  STOP                     # Natural stop point of the model or provided stop sequence.
+  MAX_TOKENS               # The maximum number of tokens as specified in the request was reached.
+  SAFETY                   # The candidate content was flagged for safety reasons.
+  RECITATION               # The candidate content was flagged for recitation reasons.
+  FAILED_HTTP_REQUEST      # The request failed due to an HTTP error.
+  EMPTY_API_KEY            # No API key was provided.
+  USER_CANCELED            # User canceled the request.
+  NO_INTERNET              # No internet connection.
+  OTHER                    # Unknown reason.
 }
 
 #region    exceptions
@@ -1205,10 +1203,10 @@ class ModelClient {
         File          = [LlmUtils]::GetUnResolvedPath([IO.Path]::Combine((Split-Path -Path ([Gemini]::Get_dataPath().FullName)), 'Config.enc'))
         GistUri       = 'https://gist.github.com/alainQtec/0710a1d4a833c3b618136e5ea98ca0b2' # replace with yours
         Quick_Exit    = $false
-        Exit_Reasons  = [enum]::GetNames([ChatExitReasons]) # If exit reason is in one of these, the bot will appologise and close.
-        StageMessage  = "You are a helpful AI assistant, named aira. you know alot about pediatrics and your job is to answer questions about it." # It can be anything to set the stage. This is just an example.
+        Exit_Reasons  = [enum]::GetNames([FinishReason]) # If exit reason is in one of these, the bot will appologise and close.
+        StageMessage  = "You are a helpful AI assistant, named Gemini." # the name can be anything. This is just an example to set the stage.
         FirstMessage  = "Hi, can you introduce yourself in one sentence?"
-        OfflineNoAns  = "I'm sorry, I can't understand what you mean; Please Connect internet and try again."
+        OfflineNoAns  = " Sorry, I can't understand what that was! Fix the problem or try again. For more info Use: `$error[0] | fl * -Force"
         NoApiKeyHelp  = 'Get your Gemini API key here: https://ai.google.dev/gemini-api/docs/api-key'
         LogOfflineErr = $false # If true then chatlogs will include results like OfflineNoAns.
         ThrowNoApiKey = $false # If false then Chat() will go in offlineMode when no api key is provided, otherwise it will throw an error and exit.
@@ -1307,23 +1305,31 @@ class ModelClient {
   [hashtable] GetRequestParams() {
     return $this.GetRequestParams($true)
   }
-  [hashtable] GetRequestParams([string]$message) {
-    return $this.GetRequestParams($message, $true)
+  [hashtable] GetRequestParams([string]$UserQuery) {
+    return $this.GetRequestParams($UserQuery, $true)
   }
   [hashtable] GetRequestParams([bool]$throwOnFailure) {
     return $this.GetRequestParams($this.Session.History, $throwOnFailure)
   }
-  [hashtable] GetRequestParams([string]$message, [bool]$throwOnFailure) {
-    [void]$this.SetModelContext(); $this.Session.History.AddMessage($message)
+  [hashtable] GetRequestParams([string]$UserQuery, [bool]$throwOnFailure) {
+    [void]$this.SetModelContext(); $this.Session.History.AddMessage($UserQuery)
     return $this.GetRequestParams($this.Session.History, $throwOnFailure)
   }
   [hashtable] GetRequestParams([ChatHistory]$History, [bool]$throwOnFailure) {
+    if ($History.Messages.Count -gt 1 -or [Gemini]::HasContext()) {
+      $LAST_MESSAGE = $History.ChatLog.contents[-1]
+      if ($LAST_MESSAGE.role -notin ("Model", "User")) {
+        throw [System.InvalidOperationException]::new("GetRequestParams() NOT_ALLOWED. Please make sure last_message in chatlog is from User or Model",
+          [ModelException]::new("Wrong Last message role", @{ ChatLog = $History.ChatLog })
+        )
+      }
+    }
     return @{
       Uri     = [Gemini].client.GetModelEndpoint($throwOnFailure)
       Method  = 'Post'
       Headers = [Gemini].client.GetHeaders()
       Body    = $History.ToJson()
-      Verbose = $true
+      Verbose = $false
     }
   }
   [void] SetModelContext() {
@@ -1332,37 +1338,35 @@ class ModelClient {
       [Gemini].client.SetModelContext([Gemini].client.Config.StageMessage, [Gemini].client.Config.FirstMessage)
     }
   }
+  [void] SetModelContext([string]$inst, [string]$msg) {
+    if ([ModelClient]::HasContext()) {
+      throw [ModelException]::new("Model context is already set for this session")
+    }
+    [Gemini].vars.Add(
+      'ctx', [PsRecord]@{
+        Instructions = $inst
+        FirstMessage = $msg
+      }
+    )
+    $this.SetModelContext([SystemInstruction]::new($inst, $msg))
+  }
   [void] SetModelContext([SystemInstruction]$instructions) {
     #.SYNOPSIS
     #  Sets system instructions for the chat session. (One-Time)
     #.DESCRIPTION
     #  Give the model additional context to understand the task, provide more customized responses, and adhere to specific guidelines
     #  over the full user interaction session.
-    Write-Verbose "SetModelContext_[One-time]`n";
     [Gemini].client.Session.AddMessage([ChatRole]::Model, [Gemini].vars.ctx.Instructions)
     $params = @{
       Uri     = [Gemini].client.GetModelEndpoint($true)
       Method  = 'Post'
       Headers = [Gemini].client.GetHeaders()
       Body    = [string]$instructions
-      Verbose = $true
+      Verbose = $false
     }
     [Gemini].vars.set('Query', [Gemini].vars.ctx.FirstMessage)
-    [Gemini].client.GetResponse($params)
-    [Gemini].client.Session.AddMessage([ChatRole]::User, [Gemini].vars.Query)
-    [Gemini].client.Session.AddMessage([ChatRole]::Assistant, [Gemini].vars.Response)
-  }
-  [ChatResponse] SetModelContext([string]$SystemMessage, [string]$FirstMessage) {
-    if ([ModelClient]::HasContext()) {
-      throw [ModelException]::new("Model context is already set for this session")
-    }
-    [Gemini].vars.Add(
-      'ctx', [PsRecord]@{
-        Instructions = $SystemMessage
-        FirstMessage = $FirstMessage
-      }
-    )
-    return $this.SetModelContext([SystemInstruction]::new($SystemMessage, $FirstMessage))
+    [Gemini].client.GetResponse($params, "Set stage (One-time)")
+    [Gemini].client.Session.RecordChat()
   }
   [string] GetAPIkey() {
     return $env:GEMINI_API_KEY
@@ -1396,7 +1400,7 @@ class ModelClient {
     } while ([string]::IsNullOrWhiteSpace([xconvert]::ToString($ApiKey)) -and $rc -lt 2)
     [Gemini].vars.set('OfflineMode', $true)
     if ([string]::IsNullOrWhiteSpace([xconvert]::ToString($ApiKey))) {
-      [Gemini].vars.set('FinishReason', 'Empty_API_key')
+      [Gemini].vars.set('FinishReason', 'EMPTY_API_KEY')
       if ([Gemini].client.Config.ThrowNoApiKey) {
         throw [System.InvalidOperationException]::new('Operation canceled due to empty API key')
       }
@@ -1453,7 +1457,8 @@ class ModelClient {
         [TokenUsage]::new($inputTokens, $model.InputCostPerToken, $outputTokens, $model.OutputCostPerToken)
       }
     }
-    Write-Host ("TokenUsage: in_tk={0}, out_tk={1}, total_cost={2}" -f $usage.InputTokens, $usage.OutputTokens, [LlmUtils]::FormatCost(($usage.OutputCost + $usage.InputCost))) -f Green
+    $usage_str = $usage ? ("TokenUsage: in_tk={0}, out_tk={1}, total_cost={2}" -f $usage.InputTokens, $usage.OutputTokens, [LlmUtils]::FormatCost(($usage.OutputCost + $usage.InputCost))) : $null
+    Write-Host "$usage_str`n" -f Green
     return $usage
   }
   static [TokenUsage] GetTokenUsage([Model]$model, [string]$inputText, [string]$outputText) {
@@ -1461,7 +1466,7 @@ class ModelClient {
     $outputTokens = [LlmUtils]::EstimateTokenCount($outputText)
     $est_total = [LlmUtils]::EstimateTokenCount([Gemini].client.Session.History.ToJson()) + $inputTokens
     if ($model.inputTokenLimit -gt 0 -and $est_total -gt $model.inputTokenLimit) {
-      [Gemini].vars.set('FinishReason', "MAX_TOKENS")
+      [Gemini].vars.set('FinishReason', 'MAX_TOKENS')
       throw [ModelException]::new("Total token count ($est_total) exceeds model's maximum : $($model.inputTokenLimit)")
     }
     return [TokenUsage]::new($inputTokens, $model.InputCostPerToken, $outputTokens, $model.OutputCostPerToken)
@@ -1525,35 +1530,30 @@ class Gemini : ModelClient {
       #         Write-Host "Invalid username or password. Please try again." -f Red
       #     }
       # }
-      $last_msg = $this.Session.History.Messages[-1]
-      if ([Gemini]::HasContext() -and ![Gemini].vars.ChatIsOngoing -and $last_msg.Role -eq "Assistant") {
-        # Do chat resume stuff here. (re-send previous failed queries ...)
-        [FinishReason]$FinishReason = [Gemini].vars.FinishReason
-        Write-Verbose "Resuming Chat ... FinishReason: $FinishReason"
-        $t = $last_msg.Content.parts[0].text
-        Write-AnimatedHost $("{0}{1}" -f [Gemini].vars.Emojis.Bot, $t) | Out-Null
-        switch -Wildcard ($FinishReason) {
-          'No_Internet' {
+      $LAST_MSG = [Gemini].Client.Session.History.Messages[-1]
+      if ([Gemini]::HasContext() -and ![Gemini].vars.ChatIsOngoing -and $LAST_MSG.Role -eq "Assistant") {
+        Write-Verbose "Resuming Chat"
+        Write-AnimatedHost $("{0}{1}" -f [Gemini].vars.Emojis.Bot, $LAST_MSG.Content.parts[0].text) | Out-Null
+        switch -Wildcard ([FinishReason][Gemini].vars.FinishReason) {
+          'NO_INTERNET' {
             # if (![Gemini].client.IsOffline) { Write-Host "Internet is back!" -f Green }
           }
-          'Failed_HttpRequest' {  }
-          'Empty_API_key' {
+          'FAILED_HTTP_REQUEST' {  }
+          'EMPTY_API_KEY' {
             [Gemini].client.SetAPIkey();
-            Write-Verbose 'Resume completed, action: SetApiKey'
             break
           }
-          "Ctrl+*" {
-            Write-Verbose 'Resume completed, action: Ctrl+'
+          "USER_CANCELED" {
             break
           }
           Default {
-            Write-Verbose 'Resume completed, action: Unknown'
+            Write-Verbose 'Resume completed, FinishReason_UNSPECIFIED'
           }
         }
       }
       [Gemini].vars.set("ChatIsOngoing", $true)
       if (![Gemini]::HasContext() -and [Gemini].client.Session.History.Messages.Count -lt 1) {
-        [void]$this.SetModelContext()
+        [Gemini].client.SetModelContext()
       }
       while ([Gemini].vars.ChatIsOngoing) { [Gemini]::ReadInput(); [Gemini].client.GetResponse(); [Gemini].client.Session.RecordChat() }
     } catch {
@@ -1624,7 +1624,7 @@ class Gemini : ModelClient {
       $key = [Console]::ReadKey($false)
       if (($key.modifiers -band [consolemodifiers]::Control) -and ($key.key -eq 'q' -or $key.key -eq 'c')) {
         Write-Debug "$(Get-Date -f 'yyyyMMdd HH:mm:ss') Closed by user exit command`n" -Debug
-        [Gemini].vars.set('FinishReason', "OTHER")
+        [Gemini].vars.set('FinishReason', 'USER_CANCELED')
         [Console]::TreatControlCAsInput = $OgctrInput
         [Gemini].vars.set('ChatIsOngoing', $false)
         $npt = [string]::Empty
@@ -1648,19 +1648,19 @@ class Gemini : ModelClient {
       [Gemini].vars.set('Response', [Gemini].client.GetOfflineResponse($npt))
       return
     }
-    [hashtable]$params = [Gemini].client.GetRequestParams($npt)
-    [Gemini].client.GetResponse($params)
+    [Gemini].client.GetResponse([hashtable][Gemini].client.GetRequestParams($npt), "Get response")
   }
-  [void] GetResponse([hashtable]$RequestParams) {
-    $res = $null; $out = ''
+  [void] GetResponse([hashtable]$RequestParams, [string]$progressmsg) {
+    $res = $null; $out = ''; [ValidateNotNullOrEmpty()][hashtable]$RequestParams = $RequestParams
+    $t = New-TemporaryFile; $RequestParams | ConvertTo-Json -Depth 100 > $t
     try {
-      [ChatResponse]$res = Invoke-RestMethod @RequestParams
+      [ChatResponse]$res = [ProgressUtil]::WaitJob($progressmsg, [scriptblock]::Create("`$p =  [IO.File]::ReadAllText(`"$t`") | ConvertFrom-Json | xconvert ToHashTable; Invoke-RestMethod @p")) | Receive-Job
       if ($null -ne $res.candidates) {
         $out = $res.candidates.content.parts.text
         [Gemini].vars.set('Response', $out)
         [Gemini].client.TokenUsageHistory.Add([Gemini].client.GetTokenUsage($res))
       } else {
-        throw [ApiException]::new('No response from server'. 503, @{
+        throw [ApiException]::new('Server on a Coffee Break ☕', 503, @{
             Response = $res
             Params   = $RequestParams
           }
@@ -1668,13 +1668,14 @@ class Gemini : ModelClient {
       }
     } catch [System.Net.Sockets.SocketException] {
       if (![Gemini].vars.OfflineMode) { Write-AnimatedHost "$([Gemini].vars.Emojis.Bot) $($_.exception.message)`n" -f Red }
-      [Gemini].vars.set('FinishReason', 'No_Internet'); [Gemini].vars.set('ChatIsOngoing', $false)
+      [Gemini].vars.set('FinishReason', 'NO_INTERNET'); [Gemini].vars.set('ChatIsOngoing', $false)
     } catch {
       if (![Gemini].vars.OfflineMode) { Write-AnimatedHost "$([Gemini].vars.Emojis.Bot) $($_.exception.message)`n" -f Red }
       [Gemini].vars.set('ChatIsOngoing', $false);
     } finally {
+      Remove-Item $t -Force -ea Ignore
       if ($null -ne $res.candidates) { [Gemini].vars.set('FinishReason', $res.candidates[0].finishReason) }
-      [Gemini].vars.set('OfflineMode', (!$res -or [Gemini].vars.FinishReason -in ('No_Internet', 'Empty_API_key')))
+      [Gemini].vars.set('OfflineMode', (!$res -or [Gemini].vars.FinishReason -in ('NO_INTERNET', 'EMPTY_API_KEY')))
     }
     if ([string]::IsNullOrWhiteSpace($out)) { $out = [Gemini].client.Config.OfflineNoAns }
     Write-AnimatedHost $("{0}{1}" -f [Gemini].vars.Emojis.Bot, $out) | Out-Null
@@ -1720,11 +1721,10 @@ class Gemini : ModelClient {
     [Gemini].vars.set('OfflineMode', ![Gemini].vars.OfflineMode)
   }
   [void] ShowMenu() {
-    Write-Host "
-  # Todo: WriteBanner() ...
-        [**GEMIMI chat**]
-  # Use Ctrl+ to pause the chat. and Ctrl+Q to exit."
-    # code for menu goes here ...
+    $b = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qOw4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACuKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKigOKjoOKjtOKjv+Kjt+KjhOKhgOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggArioIDioIDioIDioIDioIDioIDiooDio4Dio4Dio4DioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioJnio7/ioI/ioIHio4DioIDioIDioIDioIDioIDioIDioIDioIDioIDio4DioIDioIDioIDioIAK4qCA4qCA4qCA4qCA4qOk4qO+4qC/4qCf4qCb4qC/4qK/4qO24qCE4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCY4qCA4qC44qO/4qCH4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qC44qO/4qGX4qCA4qCA4qCACuKggOKggOKggOKjvuKhv+KggeKggOKggOKggOKggOKggOKggeKggOKggOKggOKggOKjgOKjpOKjhOKjgOKggOKggOKjgOKjgOKigOKjoOKjhOKhgOKggOKjgOKjoOKjhOKhgOKggOKigOKjgOKggOKjgOKjgOKigOKjoOKjhOKjgOKggOKggOKjgOKhgOKggOKggOKggArioIDioIDiorjio7/ioIPioIDioIDioIDio6Tio6Tio6Tio6Tio6TioYTioqDio77ioJ/ioJvioJvior/io7fioIDio7/io7/ioJ/ioJvioJvio7/io77ioJ/ioJvioLvio7/ioYbiorjio7/ioIDio7/io7/ioJ/ioJvioJvio7/io6fioIDio7/ioYfioIDioIDioIAK4qCA4qCA4qC44qO/4qGG4qCA4qCA4qCA4qCb4qCb4qCb4qCb4qO/4qGH4qO/4qO/4qO24qO24qO24qO24qO/4qGH4qO/4qO/4qCA4qCA4qCA4qO/4qGP4qCA4qCA4qCA4qO/4qGH4qK44qO/4qCA4qO/4qO/4qCA4qCA4qCA4qK44qO/4qCA4qO/4qGH4qCA4qCA4qCACuKggOKggOKggOKgu+Kjv+KjhOKggOKggOKggOKggOKigOKjvOKhv+KggeKiu+Kjt+KhgOKggOKggOKigOKjhOKhgOKjv+Kjv+KggOKggOKggOKjv+Khh+KggOKggOKggOKjv+Khh+KiuOKjv+KggOKjv+Kjv+KggOKggOKggOKiuOKjv+KggOKjv+Khh+KggOKggOKggArioIDioIDioIDioIDioIjioLvior/io7fio7bio7/ioL/ioJvioIDioIDioIDioLvior/io7bio77ioL/ioIvioIDioL/ioL/ioIDioIDioIDioL/ioIfioIDioIDioIDioL/ioIfioLjioL/ioIDioL/ioL/ioIDioIDioIDioLjioL/ioIDioL/ioIfioIBjbGkK4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA'));
+    Write-Host $b -f Blue # todo: Write-RGB $b -f SlateBlue; in future
+    Write-Host "Use Ctrl+<anykey> to pause the chat and Ctrl+Q to exit."
+    # other code for menu goes here ...
   }
   hidden [void] Exit() {
     [Gemini].client.Exit($false);
