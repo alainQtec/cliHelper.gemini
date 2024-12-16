@@ -15,10 +15,13 @@ then
 </li>
 <li>Chat.</br>
   <p>⤷ <b>Example</b> with <a href="https://ai.google.dev/gemini-api/docs/models/gemini#gemini-1.5-flash-8b">gemini-1.5-flash-8b</a>:</p>
-<!-- # video showing user asking the bot: How many stars are in the solar system? -->
+<!--## A video showing user asking the bot:
+Q1. How many stars are in our galaxy?
+Q2. Can you explain in one paragraph, what Luke 4:18-21 bible verse means?
+-->
 https://github.com/user-attachments/assets/2a8c8688-2483-4a44-8801-37fde5016306
 
-For more usage read the [docs](/docs/Readme.md). Its straightforward!
+❯ For more usage read the [docs](/docs/Readme.md). Its straightforward!
 
 #### Features : Work in progress
 
