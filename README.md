@@ -18,6 +18,10 @@ then
 <!--## A video showing user chatting with the gemini in cli -->
 https://github.com/user-attachments/assets/f0f36752-6a61-4bf0-9bd6-b3ee3906308e
 
+❯ Note.: The goal of this module is not to be a chatbot, rather it's to provide
+cmdlets that brings the power of google's gemini to other modules. Example:
+generating names, tags, etc.
+
 ❯ For more usage read the [docs](/docs/Readme.md). Its straightforward!
 
 #### Features : Work in progress
