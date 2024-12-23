@@ -23,6 +23,7 @@ using namespace System.Runtime.InteropServices
 enum ModelType {
   GeminiPro       # gemini-pro
   GeminiProVision # gemini-pro-vision
+  Gemini20Flash   # gemini-2.0-flash-latest
   Gemini15Flash   # gemini-1.5-flash-latest
   Gemini15Pro     # gemini-1.5-pro-latest
   ChatBison
@@ -36,9 +37,8 @@ enum ModelType {
 }
 
 enum ChatRole {
-  User      # Human
-  Assistant # AI
-  Model     # System
+  Model  # AI Assistant
+  User   # User. ex app
 }
 
 enum ActionType {
@@ -55,6 +55,10 @@ enum HarmCategory {
   HARM_CATEGORY_SEXUALLY_EXPLICIT
   HARM_CATEGORY_HARASSMENT
   HARM_CATEGORY_DANGEROUS_CONTENT
+  HARM_CATEGORY_DEROGATORY
+  HARM_CATEGORY_TOXICITY
+  HARM_CATEGORY_VIOLENCE
+  HARM_CATEGORY_MEDICAL
 }
 
 # Reason that a prompt was blocked.
@@ -181,6 +185,28 @@ class InvalidPasswordException : System.Exception {
 #endregion exceptions
 
 
+class GenerationConfig {
+  [double]$temperature
+  [double]$topP
+  [int]$topK
+  [int]$candidateCount
+  [int]$maxOutputTokens
+  [float]$presencePenalty
+  [float]$frequencyPenalty
+  [string[]]$stopSequences
+  [string]$responseMimeType
+  [hashtable]$responseSchema # Assuming 'schema' refers to a JSON schema, using hashtable for flexibility
+  [int]$seed
+  [bool]$responseLogprobs
+  [int]$logprobs
+  [bool]$audioTimestamp
+}
+
+class SafetySetting {
+  [HarmCategory]$category
+  [HarmBlockThreshold]$threshold
+}
+
 class TokenUsage {
   [int]$InputTokens
   [int]$OutputTokens
@@ -197,7 +223,7 @@ class TokenUsage {
   }
 
   [string] ToString() {
-    return "Tokens: $($this.InputTokens) in / $($this.OutputTokens) out, Cost: $([LlmUtils]::FormatCost($this.TotalCost))"
+    return "Tokens: $($this.InputTokens) in / $($this.OutputTokens) out, Cost: $([ModelClient]::FormatCost($this.TotalCost))"
   }
 }
 
@@ -369,19 +395,19 @@ class CommandLineParser {
 }
 
 class Model {
-  [string] $name = "models/gemini-1.5-flash-latest"# Required. The resource name of the Model. Refer to Model variants for all allowed values. Format: models/{model} with a {model} naming convention of: "{baseModelId}-{version}"  Ex: models/gemini-1.5-flash-001
-  [string] $baseModelId = "gemini-1.5-flash-latest" # Required. The name of the base model, pass this to the generation request. Ex: gemini-1.5-flash
+  [string] $name = "models/gemini-2.0-flash-thinking-exp"# Required. The resource name of the Model. Refer to Model variants for all allowed values. Format: models/{model} with a {model} naming convention of: "{baseModelId}-{version}"  Ex: models/gemini-1.5-flash-001
+  [string] $baseModelId = "gemini-2.0-flash-latest" # Required. The name of the base model, pass this to the generation request. Ex: gemini-1.5-flash
   [string] $version = "001" # Required. The version number of the model. This represents the major version (1.0 or 1.5)
-  [string] $displayName = "Gemini 1.5 Flash Latest" # The human-readable name of the model. E.g. "Gemini 1.5 Flash". The name can be up to 128 characters long and can consist of any UTF-8 characters.
-  [string] $description = "The most recent non-experimental release of Gemini 1.5 Flash" # A short description of the model.
-  [int] $inputTokenLimit = 4096 # Maximum number of input tokens allowed for this model.
+  [string] $displayName = "Gemini 2.0 Flash Latest" # The human-readable name of the model. E.g. "Gemini 1.5 Flash". The name can be up to 128 characters long and can consist of any UTF-8 characters.
+  [string] $description = "Gemini 2.0 Flash Thinking Experimental" # A short description of the model.
+  [int] $inputTokenLimit = 32767 # Maximum number of input tokens allowed for this model.
   [int] $outputTokenLimit = 8192 # Maximum number of output tokens available for this model.
   [string[]] $supportedGenerationMethods = ("generateContent", "countTokens")# The model's supported generation methods. The corresponding API method names are defined as Pascal case strings, such as generateMessage and generateContent.
   [float] $temperature = 1.0 # Controls the randomness of the output. Values can range over [0.0,maxTemperature], inclusive. A higher value will produce responses that are more varied, while a value closer to 0.0 will typically result in less surprising responses from the model. This value specifies default to be used by the backend while making the call to the model.
   [float] $maxTemperature = 2.0 # The maximum temperature this model can use.
   [float] $topP = 0.95 # For Nucleus sampling. Nucleus sampling considers the smallest set of tokens whose probability sum is at least topP. This value specifies default to be used by the backend while making the call to the model.
-  [float] $topK = 40.0 # For Nucleus sampling. Top-k sampling considers the set of topK most probable tokens. This value specifies default to be used by the backend while making the call to the model. If empty, indicates the model doesn't use top-k sampling, and topK isn't allowed as a generation parameter.
-  [ModelType] $Type = 2
+  [float] $topK = 64.0 # For Nucleus sampling. Top-k sampling considers the set of topK most probable tokens. This value specifies default to be used by the backend while making the call to the model. If empty, indicates the model doesn't use top-k sampling, and topK isn't allowed as a generation parameter.
+  [ModelType] $Type = "Gemini20Flash"
   [bool] $IsEnabled = $false
   [decimal] $InputCostPerToken = 0.005
   [decimal] $OutputCostPerToken = 0.001
@@ -409,6 +435,7 @@ class Model {
         "*gemini-pro*" { 'GeminiPro'; break }
         "*gemini-pro-vision*" { 'GeminiProVision'; break }
         "*gemini-1.0-pro*" { 'GeminiPro'; break }
+        "*gemini-2.0-flash*" { 'Gemini20Flash'; break }
         "*gemini-1.5-flash-latest*" { 'Gemini15Flash'; break }
         "*gemini-1.5-flash*" { 'Gemini15Flash'; break }
         "*gemini-1.5-pro-latest*" { 'Gemini15Pro'; break }
@@ -447,20 +474,41 @@ class Model {
   }
 }
 
+class Reasoning {
+  [string[]]$ThinkingProcess
+  [DateTime]$Timestamp
+  Reasoning() { $this.Timestamp = [datetime]::Now }
+  Reasoning([string[]]$thinkingSteps) {
+    $this.ThinkingProcess = $thinkingSteps
+    $this.Timestamp = [datetime]::Now
+  }
+  [string] ToString() {
+    return [string]::Join("`n", $this.ThinkingProcess).Trim()
+  }
+}
+
 class ChatMessage {
   [ChatRole]$Role
   [Content]$Content
-  [datetime]$Timestamp
+  [Reasoning]$Reasoning
 
+  ChatMessage() {}
   ChatMessage([Content]$content) {
-    $this.Role = $content.role
-    $this.Content = $content
-    $this.Timestamp = [DateTime]::Now
+    $this._init_($content, [Reasoning]::new())
   }
   ChatMessage([ChatRole]$role, [string[]]$text) {
-    $this.Role = $role
-    $this.Content = [Content]::new($role, $text)
-    $this.Timestamp = [DateTime]::Now
+    $this._init_($role, $text, [Reasoning]::new())
+  }
+  ChatMessage([ChatRole]$role, [string[]]$text, [Reasoning]$Reasoning) {
+    $this._init_($role, $text, $Reasoning)
+  }
+  hidden [void] _init_([ChatRole]$role, [string[]]$text, [Reasoning]$Reasoning) {
+    $this._init_([Content]::new($role, $text), $Reasoning)
+  }
+  hidden [void] _init_([Content]$content, [Reasoning]$Reasoning) {
+    $this.Role = $content.role
+    $this.Content = $content
+    $this.Reasoning = $Reasoning
   }
   [string] ToString() {
     return "{0}: {1}" -f $this.Role, $this.Content
@@ -490,8 +538,15 @@ class ChatHistory {
     return [ChatHistory]::new([Guid]::NewGuid())
   }
   [void] AddMessage([string]$message) {
-    [ModelClient]::HasContext() ? $this.Messages.Add([ChatMessage]::new([ChatRole][int]![bool]$this.messages[-1].Role.value__, $message)) :
-    $(throw [ModelException]::new("ChatHistory.AddMessage([string]) Failed. Model context is not set for this session"))
+    if (![ModelClient]::HasContext()) {
+      throw [ModelException]::new("ChatHistory.AddMessage([string]) Failed. Model context is not set for this session")
+    }
+    $st = [gemini].vars.Thinking; $role = [ChatRole][int]![bool]$this.messages[-1].Role.value__
+    if (![string]::IsNullOrWhiteSpace($st)) {
+      $this.Messages.Add([ChatMessage]::new($role, $message, [Reasoning]::new($st)))
+    } else {
+      $this.Messages.Add([ChatMessage]::new($role, $message))
+    }
   }
   [void] AddMessage([ChatMessage]$message) {
     $this.Messages.Add($message)
@@ -524,10 +579,26 @@ class ChatHistory {
 }
 
 class SystemInstruction {
+  [string]$role
+  [SystemInstructionPart[]]$parts = @()
+  SystemInstruction([string]$Instructions) {
+    $this.parts += [SystemInstructionPart]::new($Instructions)
+  }
+}
+
+class SystemInstructionPart {
+  [string]$text
+  SystemInstructionPart() {}
+  SystemInstructionPart([string]$text) {
+    $this.text = $text
+  }
+}
+
+class ModelContext {
   hidden [PsObject]$system_instruction
   hidden [PsObject]$contents
-  SystemInstruction([string]$SystemInstruction, [string]$FirstMessage) {
-    $this.system_instruction = @{ parts = [Part]::new($SystemInstruction) }
+  ModelContext([string]$Instructions, [string]$FirstMessage) {
+    $this.system_instruction = @{ parts = [Part]::new($Instructions) }
     $this.contents = @{ parts = [Part]::new($FirstMessage) }
   }
   [string] ToString() {
@@ -587,14 +658,13 @@ class ChatSession {
     return $o.Value
   }
   [void] AddMessage([ChatRole]$role, [string]$content) {
-    $this.RemoveLastMessage($role, $content) # prevents any duplication
+    $this.RemoveAnyDuplicateLastMessage($role, $content)
     $this.History.AddMessage([ChatMessage]::new($role, $content))
   }
-  [void] RemoveLastMessage([ChatRole]$role) {
-    $h = @{ User = 'Query'; Assistant = 'Response' }
-    $this.RemoveLastMessage($role, [gemini].vars.($h[$role]))
+  [void] RemoveAnyDuplicateLastMessage([ChatRole]$role) {
+    $this.RemoveAnyDuplicateLastMessage($role, [gemini].vars.(@{ User = 'Query'; Model = 'Response' }[$role]))
   }
-  [void] RemoveLastMessage([ChatRole]$role, [string]$content) {
+  [void] RemoveAnyDuplicateLastMessage([ChatRole]$role, [string]$content) {
     $prev = $this.History.ChatLog.contents[-1]
     if ($prev.role -eq "$role" -and $prev.parts.text -eq $content) {
       $this.History.messages.Remove($this.History.messages[-1])
@@ -606,9 +676,9 @@ class ChatSession {
     $ShouldRecord = $RecdOfflnAns -or $NonEmptyChat
     if ($ShouldRecord) {
       $this.AddMessage([ChatRole]::User, [Gemini].vars.Query)
-      $this.AddMessage([ChatRole]::Assistant, [Gemini].vars.Response)
+      $this.AddMessage([ChatRole]::Model, [Gemini].vars.Response)
     }
-    [Gemini].vars.set('Query', ''); [Gemini].vars.set('Response', '')
+    [Gemini].vars.set('Query', ''); [Gemini].vars.set('Thinking', ''); [Gemini].vars.set('Response', '')
   }
   [void] Clear() {
     $this.History.Clear()
@@ -698,6 +768,36 @@ class CitationMetadata {
   }
 }
 
+class FunctionDeclaration {
+  [string]$name
+  [string]$description
+  [hashtable]$parameters # Represents the OpenAPI Object Schema as a hashtable
+}
+
+class InlineData {
+  [string]$mimeType
+  [string]$data
+}
+
+class Tool {
+  [FunctionDeclaration[]]$functionDeclarations
+}
+
+class FileData {
+  [string]$mimeType
+  [string]$fileUri
+}
+
+class Timestamp {
+  [int]$seconds
+  [int]$nanos
+}
+
+class VideoMetadata {
+  [Timestamp]$startOffset
+  [Timestamp]$endOffset
+}
+
 # Content part - includes text or image part types.
 class Part {
   [string]$text
@@ -706,6 +806,15 @@ class Part {
   }
   Part([psobject]$psObject) {
     $this.text = $psObject.text
+  }
+  [void] SetInlineData([InlineData]$inlineData) {
+    $this.PsObject.Properties.Add([psnoteproperty]::new('inlineData', $inlineData))
+  }
+  [void] SetFileData([FileData]$fileData) {
+    $this.PsObject.Properties.Add([psnoteproperty]::new('fileData', $fileData))
+  }
+  [void] SetVideoMetadata([VideoMetadata]$videoMetadata) {
+    $this.PsObject.Properties.Add([psnoteproperty]::new('videoMetadata', $videoMetadata))
   }
   [string] ToString() {
     return $this.text
@@ -773,6 +882,16 @@ class UsageMetadata {
 }
 
 
+class RequestBody {
+  [string]$cachedContent
+  [Content[]]$contents
+  [SystemInstruction]$systemInstruction
+  [Tool[]]$tools
+  [SafetySetting[]]$safetySettings
+  [GenerationConfig]$generationConfig
+  [hashtable]$labels
+}
+
 #.SYNOPSIS
 # a class to represent the google gemini response
 class ChatResponse {
@@ -792,117 +911,6 @@ class ChatResponse {
   }
 }
 #endregion chatresponse
-
-class LlmUtils {
-  static [Model[]] GetModels() {
-    $key = $env:GEMINI_API_KEY
-    $res = Invoke-WebRequest -Method Get -Uri "https://generativelanguage.googleapis.com/v1beta/models?key=$key" -Verbose:$false
-    $_sc = $res.StatusCode
-    if ($_sc -ne 200) {
-      throw [LlmException]::new("GetModels Failed: $($res.StatusDescription)", [int]($_sc ? $_sc : 501))
-    } else {
-      Write-Host "GetModels Result: $_sc, $($res.StatusDescription)" -f Green
-    }
-    return ($res.Content | ConvertFrom-Json).models
-  }
-  static [int] EstimateTokenCount([string]$text) {
-    $wordCount = ($text -split '\s+').Count
-    $avgWordLength = 5 # Estimate average word length (adjust this based on your specific text data)
-    return [Math]::Ceiling($wordCount * $avgWordLength / 4)
-  }
-  static [string] Get_Host_Os() {
-    return $(if ($(Get-Variable PSVersionTable -Value).PSVersion.Major -le 5 -or $(Get-Variable IsWindows -Value)) { "Windows" } elseif ($(Get-Variable IsLinux -Value)) { "Linux" } elseif ($(Get-Variable IsMacOS -Value)) { "macOS" }else { "UNKNOWN" });
-  }
-  static [IO.DirectoryInfo] Get_dataPath([string]$appName, [string]$SubdirName) {
-    $_Host_OS = [LlmUtils]::Get_Host_Os()
-    $dataPath = if ($_Host_OS -eq 'Windows') {
-      [System.IO.DirectoryInfo]::new([IO.Path]::Combine($Env:HOME, "AppData", "Roaming", $appName, $SubdirName))
-    } elseif ($_Host_OS -in ('Linux', 'MacOs')) {
-      [System.IO.DirectoryInfo]::new([IO.Path]::Combine((($env:PSModulePath -split [IO.Path]::PathSeparator)[0] | Split-Path | Split-Path), $appName, $SubdirName))
-    } elseif ($_Host_OS -eq 'Unknown') {
-      try {
-        [System.IO.DirectoryInfo]::new([IO.Path]::Combine((($env:PSModulePath -split [IO.Path]::PathSeparator)[0] | Split-Path | Split-Path), $appName, $SubdirName))
-      } catch {
-        Write-Warning "Could not resolve chat data path"
-        Write-Warning "HostOS = '$_Host_OS'. Could not resolve data path."
-        [System.IO.Directory]::CreateTempSubdirectory(($SubdirName + 'Data-'))
-      }
-    } else {
-      throw [InvalidOperationException]::new('Could not resolve data path. Get_Host_OS FAILED!')
-    }
-    if (!$dataPath.Exists) { [LlmUtils]::Create_Dir($dataPath) }
-    return (Get-Item $dataPath.FullName)
-  }
-  static [void] Create_Dir([string]$Path) {
-    [LlmUtils]::Create_Dir([System.IO.DirectoryInfo]::new($Path))
-  }
-  static [void] Create_Dir([System.IO.DirectoryInfo]$Path) {
-    [ValidateNotNullOrEmpty()][System.IO.DirectoryInfo]$Path = $Path
-    $nF = @(); $p = $Path; while (!$p.Exists) { $nF += $p; $p = $p.Parent }
-    [Array]::Reverse($nF); $nF | ForEach-Object { $_.Create(); Write-Verbose "Created $_" }
-  }
-  static [string] GetUnResolvedPath([string]$Path) {
-    return [LlmUtils]::GetUnResolvedPath($((Get-Variable ExecutionContext).Value.SessionState), $Path)
-  }
-  static [string] GetUnResolvedPath([SessionState]$session, [string]$Path) {
-    return $session.Path.GetUnresolvedProviderPathFromPSPath($Path)
-  }
-  static [bool] IsImage([byte[]]$fileBytes) {
-    # Check if file bytes are null or too short
-    if ($null -eq $fileBytes -or $fileBytes.Length -lt 4) {
-      return $false
-    }
-    return ([LlmUtils]::GetImageType($fileBytes) -ne "Unknown")
-  }
-  static [string] GetImageType([string]$filePath) {
-    return [LlmUtils]::GetImageType([IO.File]::ReadAllBytes($filePath))
-  }
-  static [string] GetImageType([byte[]]$fileBytes) {
-    if ($null -eq $fileBytes -or $fileBytes.Length -lt 4) {
-      return "Unknown"
-    }
-    $imageHeaders = @{
-      "BMP"                = [System.Text.Encoding]::ASCII.GetBytes("BM")
-      "GIF87a"             = [System.Text.Encoding]::ASCII.GetBytes("GIF87a")
-      "GIF89a"             = [System.Text.Encoding]::ASCII.GetBytes("GIF89a")
-      "PNG"                = [byte[]](137, 80, 78, 71, 13, 10, 26, 10)
-      "TIFF_Little_Endian" = [byte[]](73, 73, 42, 0)
-      "TIFF_Big_Endian"    = [byte[]](77, 77, 0, 42)
-      "JPEG_Standard"      = [byte[]](255, 216, 255, 224)
-      "JPEG_Canon"         = [byte[]](255, 216, 255, 225)
-      "JPEG_Exif"          = [byte[]](255, 216, 255, 226)
-      "WebP"               = [System.Text.Encoding]::ASCII.GetBytes("RIFF")
-    }
-    foreach ($imageType in $imageHeaders.Keys) {
-      $header = $imageHeaders[$imageType]
-      if ($fileBytes.Length -ge $header.Length) {
-        $match = $true
-        for ($i = 0; $i -lt $header.Length; $i++) {
-          if ($fileBytes[$i] -ne $header[$i]) {
-            $match = $false
-            break
-          }
-        }
-        if ($match) {
-          return $imageType
-        }
-      }
-    }
-    return "Unknown"
-  }
-  static [string] NewPassword() {
-    #Todo: there should be like a small chat here to help the user generate the password
-    return cliHelper.core\New-Password -AsPlainText
-  }
-  static [string] FormatTokenCount([int]$count) {
-    return "{0:N0}" -f $count
-  }
-
-  static [string] FormatCost([decimal]$cost) {
-    return "$" + "{0:N4}" -f $cost
-  }
-}
-
 class ModelClient {
   [Model] $Model
   [PsRecord] $Config # Can be saved and loaded in next sessions
@@ -922,6 +930,7 @@ class ModelClient {
     $this.PsObject.Properties.Add([PsScriptProperty]::new('Session', [ScriptBlock]::Create({ return $this.SessionManager.GetActiveSession() })))
     $this.PsObject.Properties.Add([PsScriptProperty]::new('ConfigPath', [ScriptBlock]::Create({ return $this.Config.File })))
     $this.PsObject.Properties.Add([PsScriptProperty]::new('DataPath', [ScriptBlock]::Create({ return [Gemini]::Get_dataPath() })))
+    $this.PsObject.Methods.Add([PSScriptMethod]::new('GetChatLog', { return $this.Session.History.ChatLog }))
   }
 
   [TokenUsage] GetLastUsage() {
@@ -961,7 +970,7 @@ class ModelClient {
       if ($null -eq [Gemini].Paths) { [Gemini].PsObject.Properties.Add([PsNoteproperty]::new('Paths', [List[string]]::new())) }
     }
     if ($null -eq [Gemini].client.Config) { [Gemini].client.SetConfigs() }
-    if ($null -eq $env:GEMINI_API_KEY) { $e = [llmutils]::GetUnResolvedPath("./.env"); if ([IO.File]::Exists($e)) { Set-Env -source ([IO.FileInfo]::new($e)) -Scope User } }
+    if ($null -eq $env:GEMINI_API_KEY) { $e = [ModelClient]::GetUnResolvedPath("./.env"); if ([IO.File]::Exists($e)) { Set-Env -source ([IO.FileInfo]::new($e)) -Scope User } }
     [Gemini].vars.set(@{
         WhatIf_IsPresent = [bool]$((Get-Variable WhatIfPreference).Value.IsPresent)
         ChatIsOngoing    = $false
@@ -971,7 +980,7 @@ class ModelClient {
         Quick_Exit       = [Gemini].client.Config.Quick_Exit  #ie: if true, then no Questions asked, Just closes the damn thing.
         Key_Path         = [Gemini].client.Get_Key_Path("GeminiKey.enc") # a file in which the key can be encrypted and saved.
         ExitCode         = 0
-        Host_Os          = [LlmUtils]::Get_Host_Os()
+        Host_Os          = [ModelClient]::Get_Host_Os()
         ApiKey           = $env:GEMINI_API_KEY
         Emojis           = [PsRecord]@{ #ie: Use emojis as preffix to indicate messsage source.
           Bot  = '{0} : ' -f ([UTF8Encoding]::UTF8.GetString([byte[]](240, 159, 150, 173, 32)))
@@ -994,14 +1003,14 @@ class ModelClient {
       $this.Config = [PsRecord]@{
         Remote        = ''
         FileName      = 'Config.enc' # Config is stored locally but it's contents will always be encrypted.
-        File          = [LlmUtils]::GetUnResolvedPath([IO.Path]::Combine((Split-Path -Path ([Gemini]::Get_dataPath().FullName)), 'Config.enc'))
+        File          = [ModelClient]::GetUnResolvedPath([IO.Path]::Combine((Split-Path -Path ([Gemini]::Get_dataPath().FullName)), 'Config.enc'))
         GistUri       = 'https://gist.github.com/alainQtec/0710a1d4a833c3b618136e5ea98ca0b2' # replace with yours
         Quick_Exit    = $false
         Exit_Reasons  = [enum]::GetNames([FinishReason]) # If exit reason is in one of these, the bot will appologise and close.
         StageMessage  = "You are a helpful AI assistant, named Gemini." # the name can be anything. This is just an example to set the stage.
         FirstMessage  = "Hi, can you introduce yourself in one sentence?"
-        OfflineNoAns  = " Sorry, I can't understand what that was! Fix the problem or try again. For more info Use: `$error[0] | fl * -Force"
-        NoApiKeyHelp  = 'Get your Gemini API key here: https://ai.google.dev/gemini-api/docs/api-key'
+        OfflineNoAns  = " Sorry, I can't understand what that was! Fix the problem or try again. More info in [Gemini].vars.Error"
+        NoApiKeyHelp  = 'Get your Gemini API key: https://aistudio.google.com/. Read docs: https://ai.google.dev/gemini-api/docs/api-key'
         LogOfflineErr = $false # If true then chatlogs will include results like OfflineNoAns.
         ThrowNoApiKey = $false # If false then Chat() will go in offlineMode when no api key is provided, otherwise it will throw an error and exit.
         UsageHelp     = "Usage:`nHere's an example of how to use this bot:`n   `$bot = [Gemini]::new()`n   `$bot.Chat()`n`nAnd make sure you have Internet."
@@ -1015,7 +1024,7 @@ class ModelClient {
       # $default_Config.Remote = [uri]::new([GitHub]::GetGist($l.Owner, $l.Id).files."$($default_Config.FileName)".raw_url)
       # Write-Host "[Gemini] Get Remote gist uri Complete" -ForegroundColor Blue
     }
-    if (![string]::IsNullOrWhiteSpace($ConfigFile)) { $this.Config.File = [LlmUtils]::GetUnResolvedPath($ConfigFile) }
+    if (![string]::IsNullOrWhiteSpace($ConfigFile)) { $this.Config.File = [ModelClient]::GetUnResolvedPath($ConfigFile) }
     if (![IO.File]::Exists($this.Config.File)) {
       if ($throwOnFailure -and ![bool]$((Get-Variable WhatIfPreference).Value.IsPresent)) {
         throw [LlmConfigException]::new("Unable to find file '$($this.Config.File)'")
@@ -1035,7 +1044,7 @@ class ModelClient {
     # }
     # cli::preffix = Bot emoji
     # cli::textValidator = [scriptblock]::Create({ param($npt) if ([Gemini].vars.ChatIsOngoing -and ([string]::IsNullOrWhiteSpace($npt))) { throw [System.ArgumentNullException]::new('InputText!') } })
-    Set-PSReadLineKeyHandler -Key 'Ctrl+g' -BriefDescription GeminiCli -LongDescription "Calls Open AI on the current buffer" -ScriptBlock $([scriptblock]::Create("param(`$key, `$arg) (`$line, `$cursor) = (`$null,`$null); [Gemini]::Complete([ref]`$line, [ref]`$cursor);"))
+    Set-PSReadLineKeyHandler -Key 'Ctrl+g' -BriefDescription GeminiCli -LongDescription "Calls Gemini on the current buffer" -ScriptBlock $([scriptblock]::Create("param(`$key, `$arg) (`$line, `$cursor) = (`$null,`$null); [Gemini]::Complete([ref]`$line, [ref]`$cursor);"))
   }
   [void] SaveConfigs() {
     $this.Config.Save()
@@ -1075,7 +1084,7 @@ class ModelClient {
     return [IO.Path]::Combine($DataPath, "$fileName")
   }
   static hidden [IO.DirectoryInfo] Get_dataPath() {
-    return [LlmUtils]::Get_dataPath("clihelper.Gemini", "data")
+    return [ModelClient]::Get_dataPath("clihelper.Gemini", "data")
   }
   [string] GetModelEndpoint() {
     return $this.GetModelEndpoint($this.Model, $false)
@@ -1126,11 +1135,22 @@ class ModelClient {
       Verbose = $false
     }
   }
+  [RequestBody] GetRequestBody([ChatHistory]$History) {
+    return $null
+  }
+  [ModelContext] GetModelContext() {
+    $i = [Gemini].vars.ctx
+    if ($null -eq $i) { return $null }
+    return [ModelContext]::new($i.Instructions, $i.FirstMessage)
+  }
   [void] SetModelContext() {
     if ($null -eq [Gemini].client.Config) { [Gemini].client.SetConfigs() }
     if (![ModelClient]::HasContext()) {
       [Gemini].client.SetModelContext([Gemini].client.Config.StageMessage, [Gemini].client.Config.FirstMessage)
     }
+  }
+  [void] SetModelContext([bool]$Force) {
+    $this.SetModelContext($this.GetModelContext())
   }
   [void] SetModelContext([string]$inst, [string]$msg) {
     if ([ModelClient]::HasContext()) {
@@ -1142,20 +1162,21 @@ class ModelClient {
         FirstMessage = $msg
       }
     )
-    $this.SetModelContext([SystemInstruction]::new($inst, $msg))
+    $this.SetModelContext([ModelContext]::new($inst, $msg))
   }
-  [void] SetModelContext([SystemInstruction]$instructions) {
+  [void] SetModelContext([ModelContext]$context) {
     #.SYNOPSIS
-    #  Sets system instructions for the chat session. (One-Time)
+    #  Sets model instructions for current chat session. (One-Time)
     #.DESCRIPTION
     #  Give the model additional context to understand the task, provide more customized responses, and adhere to specific guidelines
     #  over the full user interaction session.
+    [ValidateNotNullOrEmpty()][ModelContext]$context = $context
     [Gemini].client.Session.AddMessage([ChatRole]::Model, [Gemini].vars.ctx.Instructions)
     $params = @{
       Uri     = [Gemini].client.GetModelEndpoint($true)
       Method  = 'Post'
       Headers = [Gemini].client.GetHeaders()
-      Body    = [string]$instructions
+      Body    = [string]$context
       Verbose = $false
     }
     [Gemini].vars.set('Query', [Gemini].vars.ctx.FirstMessage)
@@ -1163,8 +1184,9 @@ class ModelClient {
     [Gemini].client.Session.RecordChat()
   }
   [string] GetAPIkey() {
-    return $env:GEMINI_API_KEY
-    # return $this.GetAPIkey(([xcrypt]::GetUniqueMachineId() | xconvert ToSecurestring))
+    if ([string]::IsNullOrWhiteSpace($env:GEMINI_API_KEY)) { Set-Env -source .env -ea Ignore -Scope User }
+    $key = $env:GEMINI_API_KEY; [ValidateNotNullOrWhiteSpace()][string]$key = $key
+    return $key
   }
   [securestring] GetAPIkey([securestring]$Password) {
     $TokenFile = [Gemini].vars.ApiKey_Path; $sectoken = $null;
@@ -1238,7 +1260,11 @@ class ModelClient {
     $DataPath = $this.Config.Bot_data_Path; if (![IO.Directory]::Exists($DataPath)) { [Gemini]::Create_Dir($DataPath) }
     return [IO.Path]::Combine($DataPath, "$fileName")
   }
+  [void] AddTokenUsage([TokenUsage]$usage) {
+    if ($null -eq $usage) { return }; [Gemini].client.TokenUsageHistory.Add($usage)
+  }
   [TokenUsage] GetTokenUsage([ChatResponse]$response) {
+    if ($null -eq $response) { return $null }
     return [ModelClient]::GetTokenUsage($this.Model, $response.usageMetadata)
   }
   static [TokenUsage] GetTokenUsage([Model]$model, [UsageMetadata]$metadata) {
@@ -1251,25 +1277,133 @@ class ModelClient {
         [TokenUsage]::new($inputTokens, $model.InputCostPerToken, $outputTokens, $model.OutputCostPerToken)
       }
     }
-    $usage_str = $usage ? ("TokenUsage: in_tk={0}, out_tk={1}, total_cost={2}" -f $usage.InputTokens, $usage.OutputTokens, [LlmUtils]::FormatCost(($usage.OutputCost + $usage.InputCost))) : $null
+    $usage_str = $usage ? ("TokenUsage: in_tk={0}, out_tk={1}, total_cost={2}" -f $usage.InputTokens, $usage.OutputTokens, [ModelClient]::FormatCost(($usage.OutputCost + $usage.InputCost))) : $null
     Write-Host "$usage_str`n" -f Green
     return $usage
   }
   static [TokenUsage] GetTokenUsage([Model]$model, [string]$inputText, [string]$outputText) {
-    $inputTokens = [LlmUtils]::EstimateTokenCount($inputText)
-    $outputTokens = [LlmUtils]::EstimateTokenCount($outputText)
-    $est_total = [LlmUtils]::EstimateTokenCount([Gemini].client.Session.History.ToJson()) + $inputTokens
+    $inputTokens = [ModelClient]::EstimateTokenCount($inputText)
+    $outputTokens = [ModelClient]::EstimateTokenCount($outputText)
+    $est_total = [ModelClient]::EstimateTokenCount([Gemini].client.Session.History.ToJson()) + $inputTokens
     if ($model.inputTokenLimit -gt 0 -and $est_total -gt $model.inputTokenLimit) {
       [Gemini].vars.set('FinishReason', 'MAX_TOKENS')
       throw [ModelException]::new("Total token count ($est_total) exceeds model's maximum : $($model.inputTokenLimit)")
     }
     return [TokenUsage]::new($inputTokens, $model.InputCostPerToken, $outputTokens, $model.OutputCostPerToken)
   }
+  static [Model[]] GetModels() {
+    $key = [Gemini].client.GetAPIkey(); $res = $null
+    try {
+      $res = Invoke-WebRequest -Method Get -Uri "https://generativelanguage.googleapis.com/v1beta/models?key=$key" -Verbose:$false
+      $_sc = $res.StatusCode; if ($_sc -ne 200) { throw [LlmException]::new("GetModels Failed: $($res.StatusDescription)", [int]($_sc ? $_sc : 501)) }
+      Write-Host "GetModels Result: $_sc, $($res.StatusDescription)" -f Green
+    } catch {
+      $exc = ($_.ErrorDetails.Message ? $($e = ($_.ErrorDetails.Message | ConvertFrom-Json).error; [LlmException]::new($e.message, [int]$e.code)) : $_)
+      throw $exc
+    }
+    return ($res.Content | ConvertFrom-Json).models
+  }
+  static [int] EstimateTokenCount([string]$text) {
+    $wordCount = ($text -split '\s+').Count
+    $avgWordLength = 5 # Estimate average word length (adjust this based on your specific text data)
+    return [Math]::Ceiling($wordCount * $avgWordLength / 4)
+  }
+  static [string] Get_Host_Os() {
+    return $(if ($(Get-Variable PSVersionTable -Value).PSVersion.Major -le 5 -or $(Get-Variable IsWindows -Value)) { "Windows" } elseif ($(Get-Variable IsLinux -Value)) { "Linux" } elseif ($(Get-Variable IsMacOS -Value)) { "macOS" }else { "UNKNOWN" });
+  }
+  static [IO.DirectoryInfo] Get_dataPath([string]$appName, [string]$SubdirName) {
+    $_Host_OS = [ModelClient]::Get_Host_Os()
+    $dataPath = if ($_Host_OS -eq 'Windows') {
+      [System.IO.DirectoryInfo]::new([IO.Path]::Combine($Env:HOME, "AppData", "Roaming", $appName, $SubdirName))
+    } elseif ($_Host_OS -in ('Linux', 'MacOs')) {
+      [System.IO.DirectoryInfo]::new([IO.Path]::Combine((($env:PSModulePath -split [IO.Path]::PathSeparator)[0] | Split-Path | Split-Path), $appName, $SubdirName))
+    } elseif ($_Host_OS -eq 'Unknown') {
+      try {
+        [System.IO.DirectoryInfo]::new([IO.Path]::Combine((($env:PSModulePath -split [IO.Path]::PathSeparator)[0] | Split-Path | Split-Path), $appName, $SubdirName))
+      } catch {
+        Write-Warning "Could not resolve chat data path"
+        Write-Warning "HostOS = '$_Host_OS'. Could not resolve data path."
+        [System.IO.Directory]::CreateTempSubdirectory(($SubdirName + 'Data-'))
+      }
+    } else {
+      throw [InvalidOperationException]::new('Could not resolve data path. Get_Host_OS FAILED!')
+    }
+    if (!$dataPath.Exists) { [ModelClient]::Create_Dir($dataPath) }
+    return (Get-Item $dataPath.FullName)
+  }
+  static [void] Create_Dir([string]$Path) {
+    [ModelClient]::Create_Dir([System.IO.DirectoryInfo]::new($Path))
+  }
+  static [void] Create_Dir([System.IO.DirectoryInfo]$Path) {
+    [ValidateNotNullOrEmpty()][System.IO.DirectoryInfo]$Path = $Path
+    $nF = @(); $p = $Path; while (!$p.Exists) { $nF += $p; $p = $p.Parent }
+    [Array]::Reverse($nF); $nF | ForEach-Object { $_.Create(); Write-Verbose "Created $_" }
+  }
+  static [string] GetUnResolvedPath([string]$Path) {
+    return [ModelClient]::GetUnResolvedPath($((Get-Variable ExecutionContext).Value.SessionState), $Path)
+  }
+  static [string] GetUnResolvedPath([SessionState]$session, [string]$Path) {
+    return $session.Path.GetUnresolvedProviderPathFromPSPath($Path)
+  }
+  static [bool] IsImage([byte[]]$fileBytes) {
+    # Check if file bytes are null or too short
+    if ($null -eq $fileBytes -or $fileBytes.Length -lt 4) {
+      return $false
+    }
+    return ([ModelClient]::GetImageType($fileBytes) -ne "Unknown")
+  }
+  static [string] GetImageType([string]$filePath) {
+    return [ModelClient]::GetImageType([IO.File]::ReadAllBytes($filePath))
+  }
+  static [string] GetImageType([byte[]]$fileBytes) {
+    if ($null -eq $fileBytes -or $fileBytes.Length -lt 4) {
+      return "Unknown"
+    }
+    $imageHeaders = @{
+      "BMP"                = [System.Text.Encoding]::ASCII.GetBytes("BM")
+      "GIF87a"             = [System.Text.Encoding]::ASCII.GetBytes("GIF87a")
+      "GIF89a"             = [System.Text.Encoding]::ASCII.GetBytes("GIF89a")
+      "PNG"                = [byte[]](137, 80, 78, 71, 13, 10, 26, 10)
+      "TIFF_Little_Endian" = [byte[]](73, 73, 42, 0)
+      "TIFF_Big_Endian"    = [byte[]](77, 77, 0, 42)
+      "JPEG_Standard"      = [byte[]](255, 216, 255, 224)
+      "JPEG_Canon"         = [byte[]](255, 216, 255, 225)
+      "JPEG_Exif"          = [byte[]](255, 216, 255, 226)
+      "WebP"               = [System.Text.Encoding]::ASCII.GetBytes("RIFF")
+    }
+    foreach ($imageType in $imageHeaders.Keys) {
+      $header = $imageHeaders[$imageType]
+      if ($fileBytes.Length -ge $header.Length) {
+        $match = $true
+        for ($i = 0; $i -lt $header.Length; $i++) {
+          if ($fileBytes[$i] -ne $header[$i]) {
+            $match = $false
+            break
+          }
+        }
+        if ($match) {
+          return $imageType
+        }
+      }
+    }
+    return "Unknown"
+  }
+  static [string] NewPassword() {
+    #Todo: there should be like a small chat here to help the user generate the password
+    return cliHelper.core\New-Password -AsPlainText
+  }
+  static [string] FormatTokenCount([int]$count) {
+    return "{0:N0}" -f $count
+  }
+  static [string] FormatCost([decimal]$cost) {
+    return "$" + "{0:N4}" -f $cost
+  }
   static [bool] HasContext() {
-    $hc = [Gemini].Client.Session.History.ChatLog.contents[0].role -eq "Model"
+    # .SYNOPSIS
+    #  This will return $false true when modelcontext is set (when FirstMessage has been sent).
+    $hc = [Gemini].Client.GetChatLog().contents[0].role -eq "Model"
     $hc = $hc -and ![string]::IsNullOrWhiteSpace([Gemini].vars.ctx.FirstMessage)
     $hc = $hc -and ![string]::IsNullOrWhiteSpace([Gemini].vars.ctx.Instructions)
-    # returns $false true when modelcontext is set (when FirstMessage has been sent).
     return $hc
   }
   static [bool] IsInteractive() {
@@ -1445,21 +1579,19 @@ class Gemini : ModelClient {
     [Gemini].client.GetResponse([hashtable][Gemini].client.GetRequestParams($npt), "Get response")
   }
   [void] GetResponse([hashtable]$RequestParams, [string]$progressmsg) {
-    $res = $null; $out = ''; [ValidateNotNullOrEmpty()][hashtable]$RequestParams = $RequestParams
+    $res = $null; $out = $null; [ValidateNotNullOrEmpty()][hashtable]$RequestParams = $RequestParams
     $t = New-TemporaryFile; $RequestParams | ConvertTo-Json -Depth 100 > $t
     try {
       [ChatResponse]$res = [ProgressUtil]::WaitJob($progressmsg, [scriptblock]::Create("`$p =  [IO.File]::ReadAllText(`"$t`") | ConvertFrom-Json | xconvert ToHashTable; Invoke-RestMethod @p")) | Receive-Job
       if ($null -ne $res.candidates) {
-        $out = $res.candidates.content.parts.text
-        [Gemini].vars.set('Response', $out)
-        [Gemini].client.TokenUsageHistory.Add([Gemini].client.GetTokenUsage($res))
-      } else {
-        throw [ApiException]::new('Server on a Coffee Break ☕', 503, @{
-            Response = $res
-            Params   = $RequestParams
+        $out = $res.candidates.content.parts.text; $IsaThinkingModel = [Gemini].client.Model.name -like "*thinking*"
+        [Gemini].vars.set(@{
+            Thinking = $IsaThinkingModel ? $out[0] : $null
+            Response = $IsaThinkingModel ? $out[1].Trim() : [string]::Join('', $out).Trim()
           }
         )
       }
+      [Gemini].client.AddTokenUsage([Gemini].client.GetTokenUsage($res))
     } catch [System.Net.Sockets.SocketException] {
       if (![Gemini].vars.OfflineMode) { Write-AnimatedHost "$([Gemini].vars.Emojis.Bot) $($_.exception.message)`n" -f Red }
       [Gemini].vars.set('FinishReason', 'NO_INTERNET'); [Gemini].vars.set('ChatIsOngoing', $false)
@@ -1467,12 +1599,27 @@ class Gemini : ModelClient {
       if (![Gemini].vars.OfflineMode) { Write-AnimatedHost "$([Gemini].vars.Emojis.Bot) $($_.exception.message)`n" -f Red }
       [Gemini].vars.set('ChatIsOngoing', $false);
     } finally {
+      # Prevent the API key from being logged
+      $PREVIOUS_ERR = (Get-Error)[0]
+      [string]$_uri = $PREVIOUS_ERR.TargetObject.RequestUri.OriginalString
+      [bool]$is_sus = $_uri.Contains("key=")
+      if ($is_sus) {
+        [void]$Global:Error.RemoveAt(0); $sr = $_uri.split("key="); $sr[1] = [dotEnv]::sensor($sr[1]); $PREVIOUS_ERR.TargetObject.RequestUri = [string]::Join('', $sr);
+        $PREVIOUS_ERR.TargetObject.PsObject.Properties.Name.Foreach({
+            $PREVIOUS_ERR.ErrorDetails | Add-Member -Type NoteProperty -Name $_ -Value $PREVIOUS_ERR.TargetObject.$_
+          }
+        )
+        $PREVIOUS_ERR.ErrorDetails | Add-Member -Type NoteProperty -Name StackTrace -Value $PREVIOUS_ERR.StackTrace
+        ('Version', 'VersionPolicy').ForEach({ [void]$PREVIOUS_ERR.ErrorDetails.PSObject.Properties.Remove($_) })
+        [Gemini].vars.Set('Error', $PREVIOUS_ERR.ErrorDetails)
+        [Gemini].vars.Set('FinishReason', 'FAILED_HTTP_REQUEST')
+      }
       Remove-Item $t -Force -ea Ignore
       if ($null -ne $res.candidates) { [Gemini].vars.set('FinishReason', $res.candidates[0].finishReason) }
       [Gemini].vars.set('OfflineMode', (!$res -or [Gemini].vars.FinishReason -in ('NO_INTERNET', 'EMPTY_API_KEY')))
     }
-    if ([string]::IsNullOrWhiteSpace($out)) { $out = [Gemini].client.Config.OfflineNoAns }
-    Write-AnimatedHost $("{0}{1}" -f [Gemini].vars.Emojis.Bot, $out) | Out-Null
+    if ([string]::IsNullOrWhiteSpace([Gemini].vars.Response)) { [Gemini].vars.set('Response', [Gemini].client.Config.OfflineNoAns) }
+    Write-AnimatedHost $("{0}{1}" -f [Gemini].vars.Emojis.Bot, [Gemini].vars.Response) | Out-Null
   }
   hidden [string] GetOfflineResponse([string]$query) {
     [ValidateNotNullOrEmpty()][string]$query = $query; if ($null -eq [Gemini].vars.Keys) { [Gemini].client.SetVariables() }; [string]$resp = '';
@@ -1515,8 +1662,8 @@ class Gemini : ModelClient {
     [Gemini].vars.set('OfflineMode', ![Gemini].vars.OfflineMode)
   }
   [void] ShowMenu() {
-    $b = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String('4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qOw4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCACuKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKigOKjoOKjtOKjv+Kjt+KjhOKhgOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggOKggArioIDioIDioIDioIDioIDioIDiooDio4Dio4Dio4DioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioIDioJnio7/ioI/ioIHio4DioIDioIDioIDioIDioIDioIDioIDioIDioIDio4DioIDioIDioIDioIAK4qCA4qCA4qCA4qCA4qOk4qO+4qC/4qCf4qCb4qC/4qK/4qO24qCE4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCY4qCA4qC44qO/4qCH4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qC44qO/4qGX4qCA4qCA4qCACuKggOKggOKggOKjvuKhv+KggeKggOKggOKggOKggOKggOKggeKggOKggOKggOKggOKjgOKjpOKjhOKjgOKggOKggOKjgOKjgOKigOKjoOKjhOKhgOKggOKjgOKjoOKjhOKhgOKggOKigOKjgOKggOKjgOKjgOKigOKjoOKjhOKjgOKggOKggOKjgOKhgOKggOKggOKggArioIDioIDiorjio7/ioIPioIDioIDioIDio6Tio6Tio6Tio6Tio6TioYTioqDio77ioJ/ioJvioJvior/io7fioIDio7/io7/ioJ/ioJvioJvio7/io77ioJ/ioJvioLvio7/ioYbiorjio7/ioIDio7/io7/ioJ/ioJvioJvio7/io6fioIDio7/ioYfioIDioIDioIAK4qCA4qCA4qC44qO/4qGG4qCA4qCA4qCA4qCb4qCb4qCb4qCb4qO/4qGH4qO/4qO/4qO24qO24qO24qO24qO/4qGH4qO/4qO/4qCA4qCA4qCA4qO/4qGP4qCA4qCA4qCA4qO/4qGH4qK44qO/4qCA4qO/4qO/4qCA4qCA4qCA4qK44qO/4qCA4qO/4qGH4qCA4qCA4qCACuKggOKggOKggOKgu+Kjv+KjhOKggOKggOKggOKggOKigOKjvOKhv+KggeKiu+Kjt+KhgOKggOKggOKigOKjhOKhgOKjv+Kjv+KggOKggOKggOKjv+Khh+KggOKggOKggOKjv+Khh+KiuOKjv+KggOKjv+Kjv+KggOKggOKggOKiuOKjv+KggOKjv+Khh+KggOKggOKggArioIDioIDioIDioIDioIjioLvior/io7fio7bio7/ioL/ioJvioIDioIDioIDioLvior/io7bio77ioL/ioIvioIDioL/ioL/ioIDioIDioIDioL/ioIfioIDioIDioIDioL/ioIfioLjioL/ioIDioL/ioL/ioIDioIDioIDioLjioL/ioIDioL/ioIfioIBjbGkK4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA4qCA'));
-    Write-Host $b -f Blue # todo: Write-RGB $b -f SlateBlue; in future
+    $ascii_art = [cliart]"H4sIAAAAAAAAA9WUTW+DMAyGfxCHShMqZ9ZN0AYpPewwrpFGPiqNFg329+d8FJJg2LRVm3Z4FGO/Nge/cnrZ5emfQt9vMWfXE87pryMB1QJvwJDACwhKxLdn5p1s9w84LZB6LOl+wuFVttkGYk359f/MdDlBdn0CEog3QAMwGxOA3kH8eGN/1e5NYb7+Z/mJ3umK5xVvqaEnAnbN+cvCDud5pTlT4w0V530fed5RSE7yqR/rjWeHPvS91Sm352O4t+3TnBq4QC3LwB/QcxgsHcRZY/v0LI1fNzmvp3K5mnn/X+nderPrZslb150V0S5ZiNGU9qXObwFRPfCtrh2RHOhJOumx3rhelCve4n1i74hYuDUDHb0ne3tvRKxxfjFzjNb3LugFnpM9HfVYb1wP56B3S9mdX32SMbvLyu3Z1446Zj2jNXunqVxPoNffDZ6r1KRHe6O6mXOvWHFCbtb/5ANyx7bo2AcAAA=="
+    $ascii_art | Write-Console -f SpringGreen;
     Write-Host "Use Ctrl+<anykey> to pause the chat and Ctrl+Q to exit."
     # other code for menu goes here ...
   }
