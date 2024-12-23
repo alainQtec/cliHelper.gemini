@@ -410,3 +410,4 @@ Tests/cliHelper.gemini.Features.Tests.ps1
 Tests/cliHelper.gemini.Intergration.Tests.ps1
 Tests/Resources/Test-GitHubScript.ps1
 ./bc.zip
+bc.zip
