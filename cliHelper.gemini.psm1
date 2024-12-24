@@ -1,4 +1,5 @@
 #!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 using namespace System
 using namespace System.IO
 using namespace System.Web
@@ -21,19 +22,14 @@ using namespace System.Runtime.InteropServices
 
 #region    classes
 enum ModelType {
-  GeminiPro       # gemini-pro
-  GeminiProVision # gemini-pro-vision
-  Gemini20Flash   # gemini-2.0-flash-latest
-  Gemini15Flash   # gemini-1.5-flash-latest
-  Gemini15Pro     # gemini-1.5-pro-latest
+  GeminiProVision
+  GeminiFlash
+  GeminiPro
+  GeminiExp
   ChatBison
-  TextBison       # Measuring the relatedness of text strings
-  Custom          # embedding-gecko, gemini-exp-1114, gemini-exp-1121, gemini-exp-1206, aqa
-  AQA             # Providing source-grounded answers to questions
-  Claude
-  Azure
-  GPT
+  TextBison
   Unknown
+  AQA
 }
 
 enum ChatRole {
@@ -50,15 +46,15 @@ enum ActionType {
 
 # Harm categories that would cause prompts or candidates to be blocked.
 enum HarmCategory {
-  HARM_CATEGORY_UNSPECIFIED
-  HARM_CATEGORY_HATE_SPEECH
-  HARM_CATEGORY_SEXUALLY_EXPLICIT
-  HARM_CATEGORY_HARASSMENT
-  HARM_CATEGORY_DANGEROUS_CONTENT
-  HARM_CATEGORY_DEROGATORY
-  HARM_CATEGORY_TOXICITY
-  HARM_CATEGORY_VIOLENCE
-  HARM_CATEGORY_MEDICAL
+  UNSPECIFIED
+  HATE_SPEECH
+  SEXUALLY_EXPLICIT
+  HARASSMENT
+  DANGEROUS_CONTENT
+  DEROGATORY
+  TOXICITY
+  VIOLENCE
+  MEDICAL
 }
 
 # Reason that a prompt was blocked.
@@ -71,10 +67,10 @@ enum BlockReason {
 # Threshhold above which a prompt or candidate will be blocked.
 enum HarmBlockThreshold {
   HARM_BLOCK_THRESHOLD_UNSPECIFIED # Threshold is unspecified.
-  BLOCK_LOW_AND_ABOVE              # Content with NEGLIGIBLE will be allowed.
-  BLOCK_MEDIUM_AND_ABOVE           # Content with NEGLIGIBLE and LOW will be allowed.
-  BLOCK_ONLY_HIGH                  # Content with NEGLIGIBLE, LOW, and MEDIUM will be allowed.
-  BLOCK_NONE                       # All content will be allowed.
+  LOW_AND_ABOVE              # Content with NEGLIGIBLE will be allowed.
+  MEDIUM_AND_ABOVE           # Content with NEGLIGIBLE and LOW will be allowed.
+  ONLY_HIGH                  # Content with NEGLIGIBLE, LOW, and MEDIUM will be allowed.
+  NONE                       # All content will be allowed.
 }
 
 
@@ -89,16 +85,20 @@ enum HarmProbability {
 
 # Reason that a candidate finished.
 enum FinishReason {
-  FinishReason_UNSPECIFIED # Default value. This value is unused.
-  STOP                     # Natural stop point of the model or provided stop sequence.
-  MAX_TOKENS               # The maximum number of tokens as specified in the request was reached.
-  SAFETY                   # The candidate content was flagged for safety reasons.
-  RECITATION               # The candidate content was flagged for recitation reasons.
-  FAILED_HTTP_REQUEST      # The request failed due to an HTTP error.
-  EMPTY_API_KEY            # No API key was provided.
-  USER_CANCELED            # User canceled the request.
-  NO_INTERNET              # No internet connection.
-  OTHER                    # Unknown reason.
+  MALFORMED_FUNCTION_CALL
+  STOP
+  MAX_TOKENS
+  SAFETY
+  RECITATION
+  BLOCKLIST
+  PROHIBITED_CONTENT
+  SPII
+  UNSPECIFIED
+  FAILED_HTTP_REQUEST
+  EMPTY_API_KEY
+  USER_CANCELED
+  NO_INTERNET
+  OTHER
 }
 
 #region    exceptions
@@ -195,7 +195,7 @@ class GenerationConfig {
   [float]$frequencyPenalty
   [string[]]$stopSequences
   [string]$responseMimeType
-  [hashtable]$responseSchema # Assuming 'schema' refers to a JSON schema, using hashtable for flexibility
+  [hashtable]$responseSchema # JSON schema, using hashtable for flexibility.
   [int]$seed
   [bool]$responseLogprobs
   [int]$logprobs
@@ -407,55 +407,37 @@ class Model {
   [float] $maxTemperature = 2.0 # The maximum temperature this model can use.
   [float] $topP = 0.95 # For Nucleus sampling. Nucleus sampling considers the smallest set of tokens whose probability sum is at least topP. This value specifies default to be used by the backend while making the call to the model.
   [float] $topK = 64.0 # For Nucleus sampling. Top-k sampling considers the set of topK most probable tokens. This value specifies default to be used by the backend while making the call to the model. If empty, indicates the model doesn't use top-k sampling, and topK isn't allowed as a generation parameter.
-  [ModelType] $Type = "Gemini20Flash"
   [bool] $IsEnabled = $false
   [decimal] $InputCostPerToken = 0.005
   [decimal] $OutputCostPerToken = 0.001
 
-  Model() {}
+  Model() { $this._init_() }
   Model([PsObject]$psObject) {
-    $psObject.PsObject.Properties.Name.Foreach({ $this.$_ = $psObject.$_ })
-    $this.Type = [Model]::GetModelType($this.name)
-    if ([string]::IsNullOrWhiteSpace($this.baseModelId)) {
-      $this.baseModelId = ($this.name -like "*models/*") ? $this.name.Replace("models/", "") : $this.name
-    }
+    $psObject.PsObject.Properties.Name.Foreach({ $this.$_ = $psObject.$_ }); $this._init_()
   }
-  Model([ModelType]$modelType) {
-    $this.Type = $modelType
-    # Set default token costs based on model type
-    # switch ($modelType) {
-    #   # ...
-    # }
-  }
-  static [ModelType] GetModelType([string]$Name) {
-    if ([string]::IsNullOrWhiteSpace($Name)) {
-      return 'Unknown'
-    }
-    return $(switch -wildcard ($Name) {
-        "*gemini-pro*" { 'GeminiPro'; break }
-        "*gemini-pro-vision*" { 'GeminiProVision'; break }
-        "*gemini-1.0-pro*" { 'GeminiPro'; break }
-        "*gemini-2.0-flash*" { 'Gemini20Flash'; break }
-        "*gemini-1.5-flash-latest*" { 'Gemini15Flash'; break }
-        "*gemini-1.5-flash*" { 'Gemini15Flash'; break }
-        "*gemini-1.5-pro-latest*" { 'Gemini15Pro'; break }
-        "*gemini-1.5-pro*" { 'Gemini15Pro'; break }
-        "*chat-bison*" { 'ChatBison'; break }
-        "*text-bison*" { 'TextBison'; break }
-        "*embedding-gecko*" { 'Custom'; break }
-        "*-exp*" { 'Custom'; break }
-        "*aqa*" { 'AQA'; break }
-        default {
-          'Unknown'
+  [string] GetBaseAddress() { return [Model]::getBaseAddress($this, "CHAT") }
+  [void] SetModelType() {
+    $this.PsObject.Properties.Add([psscriptproperty]::new('Type', {
+          if ([string]::IsNullOrWhiteSpace($this.name)) { return [ModelType]::Unknown }
+          return [ModelType]$(switch -wildcard ($this.name) {
+              "*gemini*pro*vision*" { 'GeminiProVision'; break }
+              "*gemini*pro*" { 'GeminiPro'; break }
+              "*gemini*flash*" { 'GeminiFlash'; break }
+              "*chat*bison*" { 'ChatBison'; break }
+              "*text*bison*" { 'TextBison'; break }
+              "*gemini*exp*" { 'GeminiExp'; break }
+              "*aqa*" { 'AQA'; break }
+              default {
+                'Unknown'
+              }
+            }
+          )
         }
-      }
+      )
     )
   }
-  [string] GetBaseAddress() {
-    return [Model]::getBaseAddress($this, "CHAT")
-  }
   static [string] GetBaseAddress([Model]$model, [ActionType]$action) {
-    $_key = [Gemini].vars.ApiKey; if ([string]::IsNullOrWhiteSpace($_key)) { throw [LlmConfigException]::new('$env:GEMINI_API_KEY is not set. Run SetConfigs() and try again.') }
+    $_key = [Gemini].vars.ApiKey; if ([string]::IsNullOrWhiteSpace($_key)) { throw [LlmConfigException]::new('$env:GEMINI_API_KEY is not set. Run [Gemini]::SetConfigs() and try again.') }
     $base = "https://generativelanguage.googleapis.com/v1beta/$($model.name)"
     $_gen = "${base}:generateContent?key=${_key}"
     $uri = switch ($action) {
@@ -468,6 +450,12 @@ class Model {
       }
     }
     return $uri
+  }
+  hidden [void] _init_() {
+    $this.SetModelType()
+    if ([string]::IsNullOrWhiteSpace($this.baseModelId)) {
+      $this.baseModelId = ($this.name -like "*models/*") ? $this.name.Replace("models/", "") : $this.name
+    }
   }
   [string] ToString() {
     return "{0} [{1}]" -f $this.Name, $this.Type
@@ -627,6 +615,26 @@ class ChatSession {
   [guid] $SessionId = [guid]::NewGuid()
   [ChatHistory] $History
   [datetime] $CreatedAt
+  [datetime] $EndDate
+  [bool]     $Completed
+  static hidden [hashtable[]] $MemberDefinitions = @(
+    @{
+      MemberName = 'Duration'
+      MemberType = 'ScriptProperty'
+      Value      = {
+        [datetime]$UnsetDate = 0
+
+        $StartNotSet = $this.CreatedAt -eq $UnsetDate
+        $EndNotSet = $this.EndDate -eq $UnsetDate
+        $StartAfterEnd = $this.CreatedAt -gt $this.EndDate
+
+        if ($StartNotSet -or $EndNotSet -or $StartAfterEnd) {
+          return $null
+        }
+        return $this.EndDate - $this.CreatedAt
+      }
+    }
+  )
 
   ChatSession() {
     $this.History = [ChatHistory]::new($this.SessionId)
@@ -634,6 +642,11 @@ class ChatSession {
   }
   ChatSession([string]$name) {
     [void][ChatSession]::_Create([ref]$this, $name)
+  }
+  static ChatSession() {
+    foreach ($Definition in [ChatSession]::MemberDefinitions) {
+      Update-TypeData -TypeName ([ChatSession].Name) @Definition
+    }
   }
   static [ChatSession] Create() {
     return [ChatSession]::Create("New session")
@@ -669,16 +682,6 @@ class ChatSession {
     if ($prev.role -eq "$role" -and $prev.parts.text -eq $content) {
       $this.History.messages.Remove($this.History.messages[-1])
     }
-  }
-  [void] RecordChat() {
-    $RecdOfflnAns = ([Gemini].vars.OfflineMode -or [Gemini].vars.Response -eq [Gemini].client.Config.OfflineNoAns) -and [Gemini].client.Config.LogOfflineErr
-    $NonEmptyChat = !([string]::IsNullOrEmpty([Gemini].vars.Query) -and [string]::IsNullOrEmpty([Gemini].vars.Response))
-    $ShouldRecord = $RecdOfflnAns -or $NonEmptyChat
-    if ($ShouldRecord) {
-      $this.AddMessage([ChatRole]::User, [Gemini].vars.Query)
-      $this.AddMessage([ChatRole]::Model, [Gemini].vars.Response)
-    }
-    [Gemini].vars.set('Query', ''); [Gemini].vars.set('Thinking', ''); [Gemini].vars.set('Response', '')
   }
   [void] Clear() {
     $this.History.Clear()
@@ -910,112 +913,108 @@ class ChatResponse {
     $this.modelVersion = $modelVersion
   }
 }
+
 #endregion chatresponse
 class ModelClient {
   [Model] $Model
   [PsRecord] $Config # Can be saved and loaded in next sessions
-  hidden [ChatSessionManager] $SessionManager
-  hidden [List[TokenUsage]] $TokenUsageHistory
   [version] $Version = [ModelClient]::GetVersion()
   static [ValidateNotNullOrEmpty()][uri] $ConfigUri
   hidden [ValidateNotNullOrEmpty()][chatPresets] $Presets
+  hidden [ChatSessionManager] $SessionManager = [ChatSessionManager]::new()
+  hidden [List[TokenUsage]] $TokenUsageHistory = [List[TokenUsage]]::new()
 
-  ModelClient([Model]$model) {
-    $this.Model = $model
-    $this.SessionManager = [ChatSessionManager]::new()
-    $this.SessionManager.SetActiveSession($this.SessionManager.CreateSession())
-    $this.TokenUsageHistory = [List[TokenUsage]]::new()
-    $this.SetVariables();
-    # $this.SaveConfigs(); $this.ImportConfigs()
-    $this.PsObject.Properties.Add([PsScriptProperty]::new('Session', [ScriptBlock]::Create({ return $this.SessionManager.GetActiveSession() })))
-    $this.PsObject.Properties.Add([PsScriptProperty]::new('ConfigPath', [ScriptBlock]::Create({ return $this.Config.File })))
-    $this.PsObject.Properties.Add([PsScriptProperty]::new('DataPath', [ScriptBlock]::Create({ return [Gemini]::Get_dataPath() })))
-    $this.PsObject.Methods.Add([PSScriptMethod]::new('GetChatLog', { return $this.Session.History.ChatLog }))
-  }
+  ModelClient([Model]$model) { $this.Model = $model }
 
-  [TokenUsage] GetLastUsage() {
-    if ($this.TokenUsageHistory.Count -eq 0) {
+  static [TokenUsage] GetLastUsage() {
+    if ([Gemini].Client.TokenUsageHistory.Count -eq 0) {
       throw [LlmException]::new("No token usage history available")
     }
-    return $this.TokenUsageHistory[-1]
+    return [Gemini].Client.TokenUsageHistory[-1]
   }
 
-  [TokenUsage[]] GetUsageHistory() {
-    return $this.TokenUsageHistory.ToArray()
+  static [TokenUsage[]] GetUsageHistory() {
+    return [Gemini].Client.TokenUsageHistory.ToArray()
   }
 
-  [decimal] GetTotalCost() {
-    return ($this.TokenUsageHistory | Measure-Object -Property TotalCost -Sum).Sum
+  static [decimal] GetTotalCost() {
+    return ([Gemini].Client.TokenUsageHistory | Measure-Object -Property TotalCost -Sum).Sum
   }
 
-  [ChatSession] CreateSession([string]$name) {
-    return $this.SessionManager.CreateSession($name)
+  static [ChatSession] CreateSession([string]$name) {
+    return [Gemini].Client.SessionManager.CreateSession($name)
   }
 
-  [void] SetActiveSession([ChatSession]$session) {
-    $this.SessionManager.SetActiveSession($session)
+  static [void] SetActiveSession([ChatSession]$session) {
+    [Gemini].Client.SessionManager.SetActiveSession($session)
   }
-  [array] GetSessions() {
-    return $this.SessionManager.GetAllSessions()
+  static [array] GetSessions() {
+    return [Gemini].Client.SessionManager.GetAllSessions()
   }
-  [void] SetVariables() {
-    #.SYNOPSIS
-    # Sets default variables and stores them in [Gemini].vars
-    #.DESCRIPTION
-    # Makes it way easier to clean & manage (easy access) variables without worying about scopes and not dealing with global variables,
-    # Plus they expire when current session ends.
-    if ($null -eq [Gemini].vars) {
-      [Gemini].PsObject.Properties.Add([PsNoteproperty]::new('Client', $([ref]$this).Value))
-      if ($null -eq [Gemini].vars) { [Gemini].PsObject.Properties.Add([PsNoteproperty]::new('vars', [PsRecord]::new())) }
-      if ($null -eq [Gemini].Paths) { [Gemini].PsObject.Properties.Add([PsNoteproperty]::new('Paths', [List[string]]::new())) }
-    }
-    if ($null -eq [Gemini].client.Config) { [Gemini].client.SetConfigs() }
-    if ($null -eq $env:GEMINI_API_KEY) { $e = [ModelClient]::GetUnResolvedPath("./.env"); if ([IO.File]::Exists($e)) { Set-Env -source ([IO.FileInfo]::new($e)) -Scope User } }
-    [Gemini].vars.set(@{
-        WhatIf_IsPresent = [bool]$((Get-Variable WhatIfPreference).Value.IsPresent)
-        ChatIsOngoing    = $false
-        OgWindowTitle    = $(Get-Variable executionContext).Value.Host.UI.RawUI.WindowTitle
-        FinishReason     = ''
-        OfflineMode      = [Gemini].client.IsOffline
-        Quick_Exit       = [Gemini].client.Config.Quick_Exit  #ie: if true, then no Questions asked, Just closes the damn thing.
-        Key_Path         = [Gemini].client.Get_Key_Path("GeminiKey.enc") # a file in which the key can be encrypted and saved.
-        ExitCode         = 0
-        Host_Os          = [ModelClient]::Get_Host_Os()
-        ApiKey           = $env:GEMINI_API_KEY
-        Emojis           = [PsRecord]@{ #ie: Use emojis as preffix to indicate messsage source.
-          Bot  = '{0} : ' -f ([UTF8Encoding]::UTF8.GetString([byte[]](240, 159, 150, 173, 32)))
-          User = '{0} : ' -f ([UTF8Encoding]::UTF8.GetString([byte[]](240, 159, 151, 191)))
-        }
-      }
-    )
+  static [void] SetConfigs() {
+    [Gemini]::SetConfigs([string]::Empty, $false)
   }
-  [void] SetConfigs() {
-    $this.SetConfigs([string]::Empty, $false)
+  static [void] SetConfigs([string]$ConfigFile) {
+    [Gemini]::SetConfigs($ConfigFile, $true)
   }
-  [void] SetConfigs([string]$ConfigFile) {
-    $this.SetConfigs($ConfigFile, $true)
+  static [void] SetConfigs([bool]$throwOnFailure) {
+    [Gemini]::SetConfigs([string]::Empty, $throwOnFailure)
   }
-  [void] SetConfigs([bool]$throwOnFailure) {
-    $this.SetConfigs([string]::Empty, $throwOnFailure)
-  }
-  [void] SetConfigs([string]$ConfigFile, [bool]$throwOnFailure) {
-    if ($null -eq $this.Config) {
-      $this.Config = [PsRecord]@{
-        Remote        = ''
-        FileName      = 'Config.enc' # Config is stored locally but it's contents will always be encrypted.
-        File          = [ModelClient]::GetUnResolvedPath([IO.Path]::Combine((Split-Path -Path ([Gemini]::Get_dataPath().FullName)), 'Config.enc'))
-        GistUri       = 'https://gist.github.com/alainQtec/0710a1d4a833c3b618136e5ea98ca0b2' # replace with yours
-        Quick_Exit    = $false
-        Exit_Reasons  = [enum]::GetNames([FinishReason]) # If exit reason is in one of these, the bot will appologise and close.
-        StageMessage  = "You are a helpful AI assistant, named Gemini." # the name can be anything. This is just an example to set the stage.
-        FirstMessage  = "Hi, can you introduce yourself in one sentence?"
-        OfflineNoAns  = " Sorry, I can't understand what that was! Fix the problem or try again. More info in [Gemini].vars.Error"
-        NoApiKeyHelp  = 'Get your Gemini API key: https://aistudio.google.com/. Read docs: https://ai.google.dev/gemini-api/docs/api-key'
-        LogOfflineErr = $false # If true then chatlogs will include results like OfflineNoAns.
-        ThrowNoApiKey = $false # If false then Chat() will go in offlineMode when no api key is provided, otherwise it will throw an error and exit.
-        UsageHelp     = "Usage:`nHere's an example of how to use this bot:`n   `$bot = [Gemini]::new()`n   `$bot.Chat()`n`nAnd make sure you have Internet."
-        Bot_data_Path = [Gemini]::Get_dataPath().FullName
-        LastWriteTime = [datetime]::Now
+  static [void] SetConfigs([string]$ConfigFile, [bool]$throwOnFailure) {
+    if ($null -eq [Gemini].Client.Config) {
+      [Gemini].Client.Config = [PsRecord]@{
+        Remote         = ''
+        FileName       = 'Config.enc' # Config is stored locally but it's contents will always be encrypted.
+        File           = [ModelClient]::GetUnResolvedPath([IO.Path]::Combine((Split-Path -Path ([Gemini]::Get_dataPath().FullName)), 'Config.enc'))
+        GistUri        = 'https://gist.github.com/alainQtec/0710a1d4a833c3b618136e5ea98ca0b2' # replace with yours
+        Use_Quick_Exit = $false
+        ShowTokenUsage = $false
+        StageMessage   = @"
+You are a helpful AI assistant named Gemini, running in a PowerShell CLI environment, through a module called cliHelper.Gemini. Your primary goal is to assist the user with their requests in a clear and direct manner. Assume the user interacts with you through text-based commands and expects text-based responses.
+
+1. Core Principles:
+
+- Be Direct and To-the-Point: Avoid unnecessary pleasantries or overly verbose explanations. Get straight to the user's request and provide the information or solution they need efficiently.
+- Prioritize Clarity and Accuracy: Ensure your responses are easy to understand and factually correct to the best of your ability. If unsure, state your uncertainty clearly.
+- Focus on Task Completion: The user is likely using you to accomplish a specific task. Focus on providing information or generating content that helps them achieve that goal.
+- Assume Technical Proficiency (to a degree): The user is interacting with you through the CLI, implying a certain level of technical familiarity. Avoid overly simplified explanations unless explicitly asked.
+- Respect the CLI Environment: Do not give markdown responses, only utf8 ascii. Format your output to be easily readable and usable within the command line. Consider using appropriate spacing, line breaks, and formatting (like code blocks when necessary).
+
+2. Specific Instructions:
+
+- Input Interpretation:
+  * Direct Questions: Answer direct questions truthfully and concisely.
+  * Requests for Information: Provide relevant information based on the user's query.
+  * Requests for Code/Text Generation: Generate code or text as requested, adhering to specified formats and languages.
+  * Commands/Instructions: Interpret user input as commands and attempt to execute them conceptually or provide the steps to execute them. Since you operate in the CLI conceptually, you won't actually execute OS commands directly. Focus on generating the *instructions* to do so.
+
+- Output Formatting:
+  * Concise Responses: Keep answers brief and to the point.
+  * Clear Formatting: Use line breaks and spacing to improve readability.
+  * Code Blocks: Format code snippets within markdown code blocks (using triple backticks ```). Specify the language if possible.
+  * Lists: Use numbered or bulleted lists for presenting multiple items.
+
+- Tool Integration:
+  * Assume awareness of common CLI tools: You can refer to common PowerShell cmdlets and standard command-line utilities (e.g., `grep`, `sed`, `awk`, `curl`, `wget`) when providing instructions.
+  * Output designed for piping: Format your output so it can be easily piped to other CLI tools.
+
+- Example Scenarios and Expected Behaviors:
+
+User: What is the capital of France?
+You: Paris.
+
+User: Write a python script to print "hello world"
+You:
+  print("hello world")
+"@
+        FirstMessage   = "Hi, can you introduce yourself in one sentence?"
+        OfflineNoAns   = " Sorry, I can't understand what that was! Fix the problem or try again. More info in [Gemini].vars.Error"
+        NoApiKeyHelp   = 'Get your Gemini API key: https://aistudio.google.com/. Read docs: https://ai.google.dev/gemini-api/docs/api-key'
+        LogOfflineErr  = $false # If true then chatlogs will include results like OfflineNoAns.
+        ThrowNoApiKey  = $false # If false then Chat() will go in offlineMode when no api key is provided, otherwise it will throw an error and exit.
+        UsageHelp      = "Usage:`nHere's an example of how to use this bot:`n   `$bot = [Gemini]::new()`n   `$bot.Chat()`n`nAnd make sure you have Internet."
+        Bot_data_Path  = [Gemini]::Get_dataPath().FullName
+        LastWriteTime  = [datetime]::Now
       }
       # $default_Config.UsageHelp += "`n`nPreset Commands:`n"; $commands = $this.Get_default_Commands()
       # $default_Config.UsageHelp += $($commands.Keys.ForEach({ [PSCustomObject]@{ Command = $_; Aliases = $commands[$_][1]; Description = $commands[$_][2] } }) | Out-String).Replace("{", '(').Replace("}", ')')
@@ -1024,13 +1023,13 @@ class ModelClient {
       # $default_Config.Remote = [uri]::new([GitHub]::GetGist($l.Owner, $l.Id).files."$($default_Config.FileName)".raw_url)
       # Write-Host "[Gemini] Get Remote gist uri Complete" -ForegroundColor Blue
     }
-    if (![string]::IsNullOrWhiteSpace($ConfigFile)) { $this.Config.File = [ModelClient]::GetUnResolvedPath($ConfigFile) }
-    if (![IO.File]::Exists($this.Config.File)) {
+    if (![string]::IsNullOrWhiteSpace($ConfigFile)) { [Gemini].Client.Config.File = [ModelClient]::GetUnResolvedPath($ConfigFile) }
+    if (![IO.File]::Exists([Gemini].Client.Config.File)) {
       if ($throwOnFailure -and ![bool]$((Get-Variable WhatIfPreference).Value.IsPresent)) {
-        throw [LlmConfigException]::new("Unable to find file '$($this.Config.File)'")
-      }; [void](New-Item -ItemType File -Path $this.Config.File)
+        throw [LlmConfigException]::new("Unable to find file '$([Gemini].Client.Config.File)'")
+      }; [void](New-Item -ItemType File -Path [Gemini].Client.Config.File)
     }
-    if ($null -eq $this.Presets) { $this.Presets = [chatPresets]::new() }
+    if ($null -eq [Gemini].Client.Presets) { [Gemini].Client.Presets = [chatPresets]::new() }
     # $Commands = $this.Get_default_Commands()
     # $Commands.keys | ForEach-Object {
     #   $this.Presets.Add([PresetCommand]::new("$_", $Commands[$_][0]))
@@ -1043,25 +1042,25 @@ class ModelClient {
     #   }
     # }
     # cli::preffix = Bot emoji
-    # cli::textValidator = [scriptblock]::Create({ param($npt) if ([Gemini].vars.ChatIsOngoing -and ([string]::IsNullOrWhiteSpace($npt))) { throw [System.ArgumentNullException]::new('InputText!') } })
+    # cli::textValidator = [scriptblock]::Create({ param($npt) if ([Gemini].vars.ChatIsActive -and ([string]::IsNullOrWhiteSpace($npt))) { throw [System.ArgumentNullException]::new('InputText!') } })
     Set-PSReadLineKeyHandler -Key 'Ctrl+g' -BriefDescription GeminiCli -LongDescription "Calls Gemini on the current buffer" -ScriptBlock $([scriptblock]::Create("param(`$key, `$arg) (`$line, `$cursor) = (`$null,`$null); [Gemini]::Complete([ref]`$line, [ref]`$cursor);"))
   }
-  [void] SaveConfigs() {
-    $this.Config.Save()
+  static [void] SaveConfigs() {
+    [Gemini].Client.Config.Save()
   }
-  [void] SyncConfigs() {
+  static [void] SyncConfigs() {
     # Imports remote configs into current ones, then uploads the updated version to github gist
     # Compare REMOTE's lastWritetime with [IO.File]::GetLastWriteTime($this.File)
-    $this.ImportConfig($this.Config.Remote); $this.SaveConfigs()
+    [Gemini].Client.ImportConfig([Gemini].Client.Config.Remote); [Gemini]::SaveConfigs()
   }
-  [void] ImportConfigs() {
-    [void]$this.Config.Import($this.Config.File)
+  static [void] ImportConfigs() {
+    [void][Gemini].Client.Config.Import([Gemini].Client.Config.File)
   }
-  [void] ImportConfigs([uri]$raw_uri) {
+  static [void] ImportConfigs([uri]$raw_uri) {
     # $e = $env:GIST_CUD
-    $this.Config.Import($raw_uri)
+    [Gemini].Client.Config.Import($raw_uri)
   }
-  [bool] DeleteConfigs() {
+  static [bool] DeleteConfigs() {
     return [bool]$(
       try {
         Write-Warning "Not implemented yet."
@@ -1071,54 +1070,54 @@ class ModelClient {
       } catch { $false }
     )
   }
-  [void] SaveSession([string]$filePath) {
-    $this.Session.History.SaveToFile($filePath)
+  static [void] SaveSession([string]$filePath) {
+    [Gemini].Client.Session.History.SaveToFile($filePath)
   }
-  [void] LoadSession([string]$filePath) {
+  static [void] LoadSession([string]$filePath) {
     $session = [ChatSession]::new("Loaded Session")
     $session.History.LoadFromFile($filePath)
-    $this.SessionManager.SetActiveSession($session)
+    [Gemini].Client.SessionManager.SetActiveSession($session)
   }
   hidden [string] Get_Key_Path([string]$fileName) {
-    $DataPath = $this.Config.Bot_data_Path; if (![IO.Directory]::Exists($DataPath)) { [Gemini]::Create_Dir($DataPath) }
+    $DataPath = [Gemini].Client.Config.Bot_data_Path; if (![IO.Directory]::Exists($DataPath)) { [Gemini]::Create_Dir($DataPath) }
     return [IO.Path]::Combine($DataPath, "$fileName")
   }
   static hidden [IO.DirectoryInfo] Get_dataPath() {
     return [ModelClient]::Get_dataPath("clihelper.Gemini", "data")
   }
-  [string] GetModelEndpoint() {
-    return $this.GetModelEndpoint($this.Model, $false)
+  static [string] GetModelEndpoint() {
+    return [Gemini]::GetModelEndpoint([Gemini].Client.Model, $false)
   }
-  [string] GetModelEndpoint([bool]$throwOnFailure) {
-    return $this.GetModelEndpoint($this.Model, $throwOnFailure)
+  static [string] GetModelEndpoint([bool]$throwOnFailure) {
+    return [Gemini]::GetModelEndpoint([Gemini].Client.Model, $throwOnFailure)
   }
-  [string] GetModelEndpoint([Model]$model, [bool]$throwOnFailure) {
+  static [string] GetModelEndpoint([Model]$model, [bool]$throwOnFailure) {
     $e = [string]::Empty; $isgemini = $model.Type -like "Gemini*"
     if (!$isgemini -and $throwOnFailure) { throw [ModelException]::new("Unsupported model") }
     $e = $model.GetBaseAddress()
     if ([string]::IsNullOrWhiteSpace($e) -and $throwOnFailure) { throw [LlmConfigException]::new('Model endpoint is not configured correctly') }
     return $e
   }
-  [hashtable] GetHeaders() {
-    return [ModelClient]::GetHeaders($this.Model, [ActionType]::Chat)
+  static [hashtable] GetHeaders() {
+    return [ModelClient]::GetHeaders([Gemini].Client.Model, [ActionType]::Chat)
   }
   static [hashtable] GetHeaders([Model]$model, [ActionType]$action) {
     return @{ "Content-Type" = "application/json" }
   }
-  [hashtable] GetRequestParams() {
-    return $this.GetRequestParams($true)
+  static [hashtable] GetRequestParams() {
+    return [Gemini]::GetRequestParams($true)
   }
-  [hashtable] GetRequestParams([string]$UserQuery) {
-    return $this.GetRequestParams($UserQuery, $true)
+  static [hashtable] GetRequestParams([string]$UserQuery) {
+    return [Gemini]::GetRequestParams($UserQuery, $true)
   }
-  [hashtable] GetRequestParams([bool]$throwOnFailure) {
-    return $this.GetRequestParams($this.Session.History, $throwOnFailure)
+  static [hashtable] GetRequestParams([bool]$throwOnFailure) {
+    return [Gemini]::GetRequestParams([Gemini].Client.Session.History, $throwOnFailure)
   }
-  [hashtable] GetRequestParams([string]$UserQuery, [bool]$throwOnFailure) {
-    [void]$this.SetModelContext(); $this.Session.History.AddMessage($UserQuery)
-    return $this.GetRequestParams($this.Session.History, $throwOnFailure)
+  static [hashtable] GetRequestParams([string]$UserQuery, [bool]$throwOnFailure) {
+    [void][Gemini]::SetModelContext(); [Gemini].Client.Session.History.AddMessage($UserQuery)
+    return [Gemini]::GetRequestParams([Gemini].Client.Session.History, $throwOnFailure)
   }
-  [hashtable] GetRequestParams([ChatHistory]$History, [bool]$throwOnFailure) {
+  static [hashtable] GetRequestParams([ChatHistory]$History, [bool]$throwOnFailure) {
     if ($History.Messages.Count -gt 1 -or [Gemini]::HasContext()) {
       $LAST_MESSAGE = $History.ChatLog.contents[-1]
       if ($LAST_MESSAGE.role -notin ("Model", "User")) {
@@ -1128,31 +1127,31 @@ class ModelClient {
       }
     }
     return @{
-      Uri     = [Gemini].client.GetModelEndpoint($throwOnFailure)
+      Uri     = [Gemini]::GetModelEndpoint($throwOnFailure)
       Method  = 'Post'
-      Headers = [Gemini].client.GetHeaders()
+      Headers = [Gemini]::GetHeaders()
       Body    = $History.ToJson()
       Verbose = $false
     }
   }
-  [RequestBody] GetRequestBody([ChatHistory]$History) {
+  static [RequestBody] GetRequestBody([ChatHistory]$History) {
     return $null
   }
-  [ModelContext] GetModelContext() {
+  static [ModelContext] GetModelContext() {
     $i = [Gemini].vars.ctx
     if ($null -eq $i) { return $null }
     return [ModelContext]::new($i.Instructions, $i.FirstMessage)
   }
-  [void] SetModelContext() {
-    if ($null -eq [Gemini].client.Config) { [Gemini].client.SetConfigs() }
+  static [void] SetModelContext() {
+    if ($null -eq [Gemini].client.Config) { [Gemini]::SetConfigs() }
     if (![ModelClient]::HasContext()) {
-      [Gemini].client.SetModelContext([Gemini].client.Config.StageMessage, [Gemini].client.Config.FirstMessage)
+      [Gemini]::SetModelContext([Gemini].client.Config.StageMessage, [Gemini].client.Config.FirstMessage)
     }
   }
-  [void] SetModelContext([bool]$Force) {
-    $this.SetModelContext($this.GetModelContext())
+  static [void] SetModelContext([bool]$Force) {
+    [Gemini]::SetModelContext([Gemini]::GetModelContext())
   }
-  [void] SetModelContext([string]$inst, [string]$msg) {
+  static [void] SetModelContext([string]$inst, [string]$msg) {
     if ([ModelClient]::HasContext()) {
       throw [ModelException]::new("Model context is already set for this session")
     }
@@ -1162,9 +1161,9 @@ class ModelClient {
         FirstMessage = $msg
       }
     )
-    $this.SetModelContext([ModelContext]::new($inst, $msg))
+    [Gemini]::SetModelContext([ModelContext]::new($inst, $msg))
   }
-  [void] SetModelContext([ModelContext]$context) {
+  static [void] SetModelContext([ModelContext]$context) {
     #.SYNOPSIS
     #  Sets model instructions for current chat session. (One-Time)
     #.DESCRIPTION
@@ -1173,25 +1172,25 @@ class ModelClient {
     [ValidateNotNullOrEmpty()][ModelContext]$context = $context
     [Gemini].client.Session.AddMessage([ChatRole]::Model, [Gemini].vars.ctx.Instructions)
     $params = @{
-      Uri     = [Gemini].client.GetModelEndpoint($true)
+      Uri     = [Gemini]::GetModelEndpoint($true)
       Method  = 'Post'
-      Headers = [Gemini].client.GetHeaders()
+      Headers = [Gemini]::GetHeaders()
       Body    = [string]$context
       Verbose = $false
     }
     [Gemini].vars.set('Query', [Gemini].vars.ctx.FirstMessage)
-    [Gemini].client.GetResponse($params, "Set stage (One-time)")
-    [Gemini].client.Session.RecordChat()
+    [Gemini]::GetResponse($params, "Set stage (One-time)")
+    [Gemini]::RecordChat()
   }
-  [string] GetAPIkey() {
+  static [string] GetAPIkey() {
     if ([string]::IsNullOrWhiteSpace($env:GEMINI_API_KEY)) { Set-Env -source .env -ea Ignore -Scope User }
     $key = $env:GEMINI_API_KEY; [ValidateNotNullOrWhiteSpace()][string]$key = $key
     return $key
   }
-  [securestring] GetAPIkey([securestring]$Password) {
+  static [securestring] GetAPIkey([securestring]$Password) {
     $TokenFile = [Gemini].vars.ApiKey_Path; $sectoken = $null;
     if ([string]::IsNullOrWhiteSpace((Get-Content $TokenFile -ErrorAction Ignore))) {
-      $this.SetAPIkey()
+      [Gemini]::SetAPIkey()
     } elseif ([xcrypt]::IsBase64String([IO.File]::ReadAllText($TokenFile))) {
       Write-Host "[Gemini] Encrypted token found in file: $TokenFile" -ForegroundColor DarkGreen
     } else {
@@ -1204,8 +1203,8 @@ class ModelClient {
     }
     return $sectoken
   }
-  [void] SetAPIkey() {
-    if ($null -eq [Gemini].vars.Keys) { [Gemini].client.SetVariables() }
+  static [void] SetAPIkey() {
+    if ($null -eq [Gemini].vars.Keys) { [Gemini].client.__init__() }
     $ApiKey = $null; $rc = 0; $p = "Enter your Gemini API key: "
     $ogxc = [Gemini].vars.ExitCode;
     [Gemini].vars.set('ExitCode', 1)
@@ -1234,7 +1233,7 @@ class ModelClient {
       )
       if ($answer -eq 0) {
         $Pass = $null; Set-Variable -Name pass -Scope Local -Visibility Private -Option Private -Value $(if ([xcrypt]::EncryptionScope.ToString() -eq "User") { Read-Host -Prompt "[AesGCM] Paste/write a Password to encrypt apikey" -AsSecureString }else { [xconvert]::ToSecurestring([AesGCM]::GetUniqueMachineId()) })
-        [Gemini].client.SaveApiKey($ApiKey, [Gemini].vars.ApiKey_Path, $Pass)
+        [Gemini]::SaveApiKey($ApiKey, [Gemini].vars.ApiKey_Path, $Pass)
         [Gemini].vars.set('OfflineMode', $false)
       } elseif ($answer -eq 1) {
         Write-AnimatedHost "API key not saved`n." -f DarkYellow
@@ -1243,11 +1242,11 @@ class ModelClient {
       }
     } else {
       # save without asking :)
-      [Gemini].client.SaveApiKey($ApiKey, [Gemini].vars.ApiKey_Path, [xconvert]::ToSecurestring([AesGCM]::GetUniqueMachineId()))
+      [Gemini]::SaveApiKey($ApiKey, [Gemini].vars.ApiKey_Path, [xconvert]::ToSecurestring([AesGCM]::GetUniqueMachineId()))
     }
     [Gemini].vars.set('ExitCode', $ogxc)
   }
-  [void] SaveApiKey([securestring]$ApiKey, [string]$FilePath, [securestring]$password) {
+  static [void] SaveApiKey([securestring]$ApiKey, [string]$FilePath, [securestring]$password) {
     if (![IO.File]::Exists("$FilePath")) {
       Throw [FileNotFoundException]::new("Please set a valid ApiKey_Path first", $FilePath)
     }
@@ -1260,12 +1259,12 @@ class ModelClient {
     $DataPath = $this.Config.Bot_data_Path; if (![IO.Directory]::Exists($DataPath)) { [Gemini]::Create_Dir($DataPath) }
     return [IO.Path]::Combine($DataPath, "$fileName")
   }
-  [void] AddTokenUsage([TokenUsage]$usage) {
+  static [void] AddTokenUsage([TokenUsage]$usage) {
     if ($null -eq $usage) { return }; [Gemini].client.TokenUsageHistory.Add($usage)
   }
-  [TokenUsage] GetTokenUsage([ChatResponse]$response) {
+  static [TokenUsage] GetTokenUsage([ChatResponse]$response) {
     if ($null -eq $response) { return $null }
-    return [ModelClient]::GetTokenUsage($this.Model, $response.usageMetadata)
+    return [ModelClient]::GetTokenUsage([Gemini].Client.Model, $response.usageMetadata)
   }
   static [TokenUsage] GetTokenUsage([Model]$model, [UsageMetadata]$metadata) {
     $usage = switch ($model.ModelType) {
@@ -1277,7 +1276,7 @@ class ModelClient {
         [TokenUsage]::new($inputTokens, $model.InputCostPerToken, $outputTokens, $model.OutputCostPerToken)
       }
     }
-    $usage_str = $usage ? ("TokenUsage: in_tk={0}, out_tk={1}, total_cost={2}" -f $usage.InputTokens, $usage.OutputTokens, [ModelClient]::FormatCost(($usage.OutputCost + $usage.InputCost))) : $null
+    $usage_str = ([Gemini].client.Config.ShowTokenUsage -and $usage) ? ("TokenUsage: in_tk={0}, out_tk={1}, total_cost={2}" -f $usage.InputTokens, $usage.OutputTokens, [ModelClient]::FormatCost(($usage.OutputCost + $usage.InputCost))) : $null
     Write-Host "$usage_str`n" -f Green
     return $usage
   }
@@ -1438,17 +1437,16 @@ class Gemini : ModelClient {
   static [Model] $defaultModel = [model]::new()
   static hidden [Collection[Byte[]]] $banners = @()
 
-  Gemini() : base([Gemini]::defaultModel) { [Gemini]::Initialize() }
-  Gemini([Model]$model) : base($model) { [Gemini]::Initialize() }
+  Gemini() : base([Gemini]::defaultModel) { $this.__init__(); }
+  Gemini([Model]$model) : base($model) { $this.__init__(); }
 
   static [Gemini] Create() {
     [void][Gemini]::new(); return [Gemini].client
   }
-
   [void] Chat() {
     $(Get-Variable executionContext).Value.Host.UI.RawUI.WindowTitle = "Gemini";
     try {
-      [Gemini].client.ShowMenu()
+      [Gemini]::ShowMenu()
       # $authenticated = $false
       # while (-not $authenticated) {
       #     $username = $this.Prompt("Please enter your username:")
@@ -1459,53 +1457,73 @@ class Gemini : ModelClient {
       #     }
       # }
       $LAST_MSG = [Gemini].Client.Session.History.Messages[-1]
-      if ([Gemini]::HasContext() -and ![Gemini].vars.ChatIsOngoing -and $LAST_MSG.Role -eq "Assistant") {
+      if ([Gemini]::HasContext() -and ![Gemini].vars.ChatIsActive -and $LAST_MSG.Role -eq "Assistant") {
         Write-Verbose "Resuming Chat"
         Write-AnimatedHost $("{0}{1}" -f [Gemini].vars.Emojis.Bot, $LAST_MSG.Content.parts[0].text) | Out-Null
-        switch -Wildcard ([FinishReason][Gemini].vars.FinishReason) {
+        switch ([FinishReason][Gemini].vars.FinishReason) {
           'NO_INTERNET' {
-            # if (![Gemini].client.IsOffline) { Write-Host "Internet is back!" -f Green }
+            # if (![Gemini].client.IsOffline) { Write-Host "Connected!" -f Green }
           }
-          'FAILED_HTTP_REQUEST' {  }
+          'FAILED_HTTP_REQUEST' {
+            Write-Verbose 'Resume completed, FinishReason: The request failed due to an HTTP error.'
+          }
           'EMPTY_API_KEY' {
-            [Gemini].client.SetAPIkey();
+            Write-Verbose 'Resume completed, FinishReason: No API key was provided.'
+            [Gemini]::SetAPIkey();
+            break
+          }
+          'SPII' {
+            Write-Verbose 'Resume completed, FinishReason: Token generation was stopped because the response was flagged for sensitive personally identifiable information (SPII)'
             break
           }
           "USER_CANCELED" {
+            Write-Verbose 'Resume completed, FinishReason: User canceled the request.'
+            break
+          }
+          'MALFORMED_FUNCTION_CALL' {
+            Write-Verbose 'Resume completed, FinishReason: Candidates were blocked because of malformed and unparsable function call'
+            break
+          }
+          'STOP' {
+            Write-Verbose 'Resume completed, FinishReason: Natural stop point of the model.'
+            break
+          }
+          'MAX_TOKENS' {
+            Write-Verbose 'Resume completed, FinishReason: The maximum number of tokens as specified in the request was reached.'
+            break
+          }
+          'SAFETY' {
+            Write-Verbose 'Resume completed, FinishReason: Token generation was stopped because the response was flagged for safety reasons. Note that Candidate.content is empty if content filters block the output.'
+            break
+          }
+          'RECITATION' {
+            Write-Verbose 'Resume completed, FinishReason: The token generation was stopped because the response was flagged for unauthorized citations.'
+            break
+          }
+          'BLOCKLIST' {
+            Write-Verbose 'Resume completed, FinishReason: Token generation was stopped because the response includes blocked terms.'
+            break
+          }
+          'PROHIBITED_CONTENT' {
+            Write-Verbose 'Resume completed, FinishReason: Token generation was stopped because the response was flagged for prohibited content, such as child sexual abuse material (CSAM).'
             break
           }
           Default {
-            Write-Verbose 'Resume completed, FinishReason_UNSPECIFIED'
+            Write-Verbose 'Resume completed, FinishReason: UNSPECIFIED'
           }
         }
       }
-      [Gemini].vars.set("ChatIsOngoing", $true)
+      [Gemini].vars.set("ChatIsActive", $true)
       if (![Gemini]::HasContext() -and [Gemini].client.Session.History.Messages.Count -lt 1) {
-        [Gemini].client.SetModelContext()
+        [Gemini]::SetModelContext()
       }
-      while ([Gemini].vars.ChatIsOngoing) { [Gemini]::ReadInput(); [Gemini].client.GetResponse(); [Gemini].client.Session.RecordChat() }
+      while ([Gemini].vars.ChatIsActive) { [Gemini]::ReadInput(); [Gemini]::GetResponse(); [Gemini]::RecordChat() }
     } catch {
       [Gemini].vars.set("ExitCode", 1)
       Write-Host "     $_" -f Red
     } finally {
       [Gemini].vars.set("ExitCode", [int][bool]([Gemini].vars.FinishReason -in [Gemini].client.Config.ERROR_NAMES))
     }
-  }
-  static [void] Initialize() {
-    if ($null -eq [Gemini]::ConfigUri) {
-      if ($null -eq [Gemini].client.Config) { [Gemini].client.SetConfigs() }
-      [Gemini]::ConfigUri = [Gemini].client.Config.Remote
-    }
-    if (![IO.File]::Exists([Gemini].client.Config.File)) {
-      if ([Gemini]::useverbose) { "[+] Get your latest configs .." | Write-Host -ForegroundColor Magenta }
-      cliHelper.core\Start-DownloadWithRetry -Url ([Gemini]::ConfigUri) -DownloadPath [Gemini].client.Config.File -Retries 3
-    }
-  }
-  [void] RegisterUser() {
-    # TODO: FINSISH this .. I'm tir3d!
-    # store the encrypted(user+ hashedPassword) s in a file. ie:
-    # user1:HashedPassword1 -encrypt-> 3dsf#s3s#$3!@dd*34d@dssxb
-    # user2:HashedPassword2 -encrypt-> dds#$3!@dssd*sf#s343dfdsf
   }
   [bool] Login([string]$UserName, [securestring]$Password) {
     # This method authenticates the user by verifying the supplied username and password.
@@ -1520,6 +1538,54 @@ class Gemini : ModelClient {
       return $false
     }
   }
+
+  hidden [void] __init__() {
+    #.SYNOPSIS
+    # Initialize the model client : sets default variables and configs
+    #.DESCRIPTION
+    # Makes it way easier to clean & manage (easy access) variables without worying about scopes and not dealing with global variables,
+    # Plus they expire when current session ends.
+    if ($null -eq [Gemini].vars) {
+      [Gemini].PsObject.Properties.Add([PsNoteproperty]::new('Client', $([ref]$this).Value))
+      if ($null -eq [Gemini].vars) { [Gemini].PsObject.Properties.Add([PsNoteproperty]::new('vars', [PsRecord]::new())) }
+      if ($null -eq [Gemini].Paths) { [Gemini].PsObject.Properties.Add([PsNoteproperty]::new('Paths', [List[string]]::new())) }
+    }
+    if ($null -eq [Gemini].client.Config) { [Gemini]::SetConfigs() }
+    if ($null -eq $env:GEMINI_API_KEY) { $e = [ModelClient]::GetUnResolvedPath("./.env"); if ([IO.File]::Exists($e)) { Set-Env -source ([IO.FileInfo]::new($e)) -Scope User } }
+    [Gemini].vars.set(@{
+        WhatIf_IsPresent = [bool]$((Get-Variable WhatIfPreference).Value.IsPresent)
+        Use_Quick_Exit   = [Gemini].client.Config.Use_Quick_Exit  #ie: if true, then no Questions asked, Just closes the damn thing.
+        OgWindowTitle    = $(Get-Variable executionContext).Value.Host.UI.RawUI.WindowTitle
+        ChatIsActive     = $false
+        FinishReason     = ''
+        OfflineMode      = [Gemini].client.IsOffline
+        Key_Path         = [Gemini].client.Get_Key_Path("GeminiKey.enc") # a file in which the key can be encrypted and saved.
+        ExitCode         = 0
+        Host_Os          = [ModelClient]::Get_Host_Os()
+        ApiKey           = $env:GEMINI_API_KEY
+        Emojis           = [PsRecord]@{ #ie: Use emojis as preffix to indicate messsage source.
+          Bot  = '{0} : ' -f ([UTF8Encoding]::UTF8.GetString([byte[]](240, 159, 150, 173, 32)))
+          User = '{0} : ' -f ([UTF8Encoding]::UTF8.GetString([byte[]](240, 159, 151, 191)))
+        }
+      }
+    )
+    [Gemini]::SetActiveSession($this.SessionManager.CreateSession())
+    $this.PsObject.Properties.Add([PsScriptProperty]::new('Session', [ScriptBlock]::Create({ return $this.SessionManager.GetActiveSession() })))
+    $this.PsObject.Properties.Add([PsScriptProperty]::new('ConfigPath', [ScriptBlock]::Create({ return $this.Config.File })))
+    $this.PsObject.Properties.Add([PsScriptProperty]::new('DataPath', [ScriptBlock]::Create({ return [Gemini]::Get_dataPath() })))
+    $this.PsObject.Methods.Add([PSScriptMethod]::new('GetChatLog', { return $this.Session.History.ChatLog }))
+
+    if ($null -eq [Gemini]::ConfigUri) {
+      if ($null -eq [Gemini].client.Config) { [Gemini]::SetConfigs() }
+      [Gemini]::ConfigUri = [Gemini].client.Config.Remote
+    }
+    if (![IO.File]::Exists([Gemini].client.Config.File)) {
+      if ([Gemini]::useverbose) { "[+] Get your latest configs .." | Write-Host -ForegroundColor Magenta }
+      cliHelper.core\Start-DownloadWithRetry -Url ([Gemini]::ConfigUri) -DownloadPath [Gemini].client.Config.File -Retries 3
+    }
+
+    # [Gemini]::SaveConfigs(); [Gemini]::ImportConfigs()
+  }
   static [void] LoadUsers([string]$UserFile) {
     [ValidateNotNullOrEmpty()][string]$UserFile = $UserFile
     # Reads the user file and loads the usernames and hashed passwords into a hashtable.
@@ -1532,6 +1598,12 @@ class Gemini : ModelClient {
         [Gemini].vars.Users[$username] = $password
       }
     }
+  }
+  static [void] RegisterUser() {
+    # TODO: FINSISH this .. I'm tir3d!
+    # store the encrypted(user+ hashedPassword) s in a file. ie:
+    # user1:HashedPassword1 -encrypt-> 3dsf#s3s#$3!@dd*34d@dssxb
+    # user2:HashedPassword2 -encrypt-> dds#$3!@dssd*sf#s343dfdsf
   }
   static [void] RegisterUser([string]$username, [securestring]$password) {
     [ValidateNotNullOrEmpty()][string]$username = $username
@@ -1547,14 +1619,14 @@ class Gemini : ModelClient {
   static [void] ReadInput() {
     $npt = [string]::Empty; $OgctrInput = [Console]::TreatControlCAsInput;
     [void][Console]::WriteLine(); if (![console]::KeyAvailable) { [Console]::TreatControlCAsInput = $true } #Treat Ctrl key as normal Input
-    while ([string]::IsNullOrWhiteSpace($npt) -and [Gemini].vars.ChatIsOngoing) {
+    while ([string]::IsNullOrWhiteSpace($npt) -and [Gemini].vars.ChatIsActive) {
       Write-AnimatedHost ([Gemini].vars.emojis.user) -f Green
       $key = [Console]::ReadKey($false)
       if (($key.modifiers -band [consolemodifiers]::Control) -and ($key.key -eq 'q' -or $key.key -eq 'c')) {
         Write-Debug "$(Get-Date -f 'yyyyMMdd HH:mm:ss') Closed by user exit command`n" -Debug
         [Gemini].vars.set('FinishReason', 'USER_CANCELED')
         [Console]::TreatControlCAsInput = $OgctrInput
-        [Gemini].vars.set('ChatIsOngoing', $false)
+        [Gemini].vars.set('ChatIsActive', $false)
         $npt = [string]::Empty
       } else {
         [console]::CancelKeyPress
@@ -1564,21 +1636,21 @@ class Gemini : ModelClient {
     [Console]::TreatControlCAsInput = $OgctrInput
     [Gemini].vars.set('Query', $npt);
   }
-  [void] GetResponse() {
-    ([Gemini].vars.ChatIsOngoing -and ![string]::IsNullOrWhiteSpace([Gemini].vars.Query)) ? [Gemini].client.GetResponse([Gemini].vars.Query) : $null
+  static [void] GetResponse() {
+    ([Gemini].vars.ChatIsActive -and ![string]::IsNullOrWhiteSpace([Gemini].vars.Query)) ? [Gemini]::GetResponse([Gemini].vars.Query) : $null
   }
-  [void] GetResponse([string]$npt) {
+  static [void] GetResponse([string]$npt) {
     [ValidateNotNullOrEmpty()][string]$npt = $npt;
-    if ($null -eq [Gemini].client.GetAPIkey()) {
-      [Gemini]::IsInteractive() ? $this.SetAPIkey() : $(throw 'Please run SetAPIkey() first and try again. Get yours at: https://ai.google.dev/gemini-api/docs/api-key')
+    if ($null -eq [Gemini]::GetAPIkey()) {
+      [Gemini]::IsInteractive() ? [Gemini]::SetAPIkey() : $(throw 'Please run [Gemini]::SetAPIkey() first and try again. Get yours at: https://ai.google.dev/gemini-api/docs/api-key')
     }
     if ([Gemini].vars.OfflineMode -or [Gemini].vars.FinishReason -eq 'Empty_API_key') {
       [Gemini].vars.set('Response', [Gemini].client.GetOfflineResponse($npt))
       return
     }
-    [Gemini].client.GetResponse([hashtable][Gemini].client.GetRequestParams($npt), "Get response")
+    [Gemini]::GetResponse([hashtable][Gemini]::GetRequestParams($npt), "Get response")
   }
-  [void] GetResponse([hashtable]$RequestParams, [string]$progressmsg) {
+  static [void] GetResponse([hashtable]$RequestParams, [string]$progressmsg) {
     $res = $null; $out = $null; [ValidateNotNullOrEmpty()][hashtable]$RequestParams = $RequestParams
     $t = New-TemporaryFile; $RequestParams | ConvertTo-Json -Depth 100 > $t
     try {
@@ -1591,13 +1663,13 @@ class Gemini : ModelClient {
           }
         )
       }
-      [Gemini].client.AddTokenUsage([Gemini].client.GetTokenUsage($res))
+      [Gemini]::AddTokenUsage([Gemini]::GetTokenUsage($res))
     } catch [System.Net.Sockets.SocketException] {
       if (![Gemini].vars.OfflineMode) { Write-AnimatedHost "$([Gemini].vars.Emojis.Bot) $($_.exception.message)`n" -f Red }
-      [Gemini].vars.set('FinishReason', 'NO_INTERNET'); [Gemini].vars.set('ChatIsOngoing', $false)
+      [Gemini].vars.set('FinishReason', 'NO_INTERNET'); [Gemini].vars.set('ChatIsActive', $false)
     } catch {
       if (![Gemini].vars.OfflineMode) { Write-AnimatedHost "$([Gemini].vars.Emojis.Bot) $($_.exception.message)`n" -f Red }
-      [Gemini].vars.set('ChatIsOngoing', $false);
+      [Gemini].vars.set('ChatIsActive', $false);
     } finally {
       # Prevent the API key from being logged
       $PREVIOUS_ERR = (Get-Error)[0]
@@ -1621,8 +1693,18 @@ class Gemini : ModelClient {
     if ([string]::IsNullOrWhiteSpace([Gemini].vars.Response)) { [Gemini].vars.set('Response', [Gemini].client.Config.OfflineNoAns) }
     Write-AnimatedHost $("{0}{1}" -f [Gemini].vars.Emojis.Bot, [Gemini].vars.Response) | Out-Null
   }
+  static [void] RecordChat() {
+    $RecdOfflnAns = ([Gemini].vars.OfflineMode -or [Gemini].vars.Response -eq [Gemini].client.Config.OfflineNoAns) -and [Gemini].client.Config.LogOfflineErr
+    $NonEmptyChat = !([string]::IsNullOrEmpty([Gemini].vars.Query) -and [string]::IsNullOrEmpty([Gemini].vars.Response))
+    $ShouldRecord = $RecdOfflnAns -or $NonEmptyChat
+    if ($ShouldRecord) {
+      [Gemini].client.Session.AddMessage([ChatRole]::User, [Gemini].vars.Query)
+      [Gemini].client.Session.AddMessage([ChatRole]::Model, [Gemini].vars.Response)
+    }
+    [Gemini].vars.set('Query', ''); [Gemini].vars.set('Thinking', ''); [Gemini].vars.set('Response', '')
+  }
   hidden [string] GetOfflineResponse([string]$query) {
-    [ValidateNotNullOrEmpty()][string]$query = $query; if ($null -eq [Gemini].vars.Keys) { [Gemini].client.SetVariables() }; [string]$resp = '';
+    [ValidateNotNullOrEmpty()][string]$query = $query; if ($null -eq [Gemini].vars.Keys) { [Gemini].client.__init__() }; [string]$resp = '';
     if ([Gemini].Client.Session.ChatLog.Messages.Count -eq 0 -and [Gemini].vars.Query -eq [Gemini].client.Config.First_Query) { return [Gemini].client.Config.OfflineHello }
     $resp = [Gemini].client.Config.OfflineNoAns; trap { $resp = "Error! $_`n$resp" }
     Write-Debug "Checking through presets ..." -Debug
@@ -1661,7 +1743,7 @@ class Gemini : ModelClient {
   static [void] ToggleOffline() {
     [Gemini].vars.set('OfflineMode', ![Gemini].vars.OfflineMode)
   }
-  [void] ShowMenu() {
+  static [void] ShowMenu() {
     $ascii_art = [cliart]"H4sIAAAAAAAAA9WUTW+DMAyGfxCHShMqZ9ZN0AYpPewwrpFGPiqNFg329+d8FJJg2LRVm3Z4FGO/Nge/cnrZ5emfQt9vMWfXE87pryMB1QJvwJDACwhKxLdn5p1s9w84LZB6LOl+wuFVttkGYk359f/MdDlBdn0CEog3QAMwGxOA3kH8eGN/1e5NYb7+Z/mJ3umK5xVvqaEnAnbN+cvCDud5pTlT4w0V530fed5RSE7yqR/rjWeHPvS91Sm352O4t+3TnBq4QC3LwB/QcxgsHcRZY/v0LI1fNzmvp3K5mnn/X+nderPrZslb150V0S5ZiNGU9qXObwFRPfCtrh2RHOhJOumx3rhelCve4n1i74hYuDUDHb0ne3tvRKxxfjFzjNb3LugFnpM9HfVYb1wP56B3S9mdX32SMbvLyu3Z1446Zj2jNXunqVxPoNffDZ6r1KRHe6O6mXOvWHFCbtb/5ANyx7bo2AcAAA=="
     $ascii_art | Write-Console -f SpringGreen;
     Write-Host "Use Ctrl+<anykey> to pause the chat and Ctrl+Q to exit."
@@ -1673,10 +1755,10 @@ class Gemini : ModelClient {
   hidden [void] Exit([bool]$cleanUp) {
     $ExitMsg = if ([Gemini].vars.ExitCode -gt 0) { "Sorry, an error Occured, Ending chat session ...`n     " } else { "Okay, see you nextime." };
     # save stuff, Restore stuff
-    [System.Console]::Out.NewLine; [void]$this.SaveSession()
+    [System.Console]::Out.NewLine; [void][Gemini]::SaveSession()
     $(Get-Variable executionContext).Value.Host.UI.RawUI.WindowTitle = [Gemini].vars.OgWindowTitle
     [Gemini].vars.set('Query', 'exit'); [Gemini].Client.Session.ChatLog.SetMessage([Gemini].vars.Query);
-    if ([Gemini].vars.Quick_Exit) {
+    if ([Gemini].vars.Use_Quick_Exit) {
       [Gemini].vars.set('Response', ( Write-AnimatedHost $ExitMsg)); return
     }
     $cResp = 'Do you mean Close chat?'
@@ -1693,14 +1775,14 @@ class Gemini : ModelClient {
     Write-Debug "Checking answers ..."
     if ($answer -eq 0) {
       [Gemini].vars.set('Query', 'yes')
-      [Gemini].client.Session.RecordChat(); [Gemini].Client.Session.ChatLog.SetResponse((Write-AnimatedHost $ExitMsg));
-      [Gemini].vars.set('ChatIsOngoing', $false)
+      [Gemini]::RecordChat(); [Gemini].Client.Session.ChatLog.SetResponse((Write-AnimatedHost $ExitMsg));
+      [Gemini].vars.set('ChatIsActive', $false)
       [Gemini].vars.set('ExitCode', 0)
     } else {
-      [Gemini].client.Session.RecordChat();
+      [Gemini]::RecordChat();
       [Gemini].Client.Session.ChatLog.SetMessage('no');
       [Gemini].Client.Session.ChatLog.SetResponse((Write-AnimatedHost "Okay; then I'm here to help If you need anything."));
-      [Gemini].vars.set('ChatIsOngoing', $true)
+      [Gemini].vars.set('ChatIsActive', $true)
     }
     [Gemini].vars.set('Query', ''); [Gemini].vars.set('Response', '')
     if ($cleanUp) {
