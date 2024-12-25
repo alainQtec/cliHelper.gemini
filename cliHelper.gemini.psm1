@@ -1,5 +1,4 @@
 #!/usr/bin/env pwsh
-#!/usr/bin/env pwsh
 using namespace System
 using namespace System.IO
 using namespace System.Web
@@ -617,35 +616,31 @@ class ChatSession {
   [datetime] $CreatedAt
   [datetime] $EndDate
   [bool]     $Completed
-  static hidden [hashtable[]] $MemberDefinitions = @(
-    @{
-      MemberName = 'Duration'
-      MemberType = 'ScriptProperty'
-      Value      = {
-        [datetime]$UnsetDate = 0
-
-        $StartNotSet = $this.CreatedAt -eq $UnsetDate
-        $EndNotSet = $this.EndDate -eq $UnsetDate
-        $StartAfterEnd = $this.CreatedAt -gt $this.EndDate
-
-        if ($StartNotSet -or $EndNotSet -or $StartAfterEnd) {
-          return $null
-        }
-        return $this.EndDate - $this.CreatedAt
-      }
-    }
-  )
 
   ChatSession() {
     $this.History = [ChatHistory]::new($this.SessionId)
     $this.CreatedAt = [DateTime]::Now
+    $this.PsObject.Properties.Add([PSScriptProperty]::new('Duration', {
+          [datetime]$UnsetDate = 0
+          $StartNotSet = $this.CreatedAt -eq $UnsetDate
+          $EndNotSet = $this.EndDate -eq $UnsetDate
+          $StartAfterEnd = $this.CreatedAt -gt $this.EndDate
+          if ($StartNotSet -or $EndNotSet -or $StartAfterEnd) {
+            return $null
+          }
+          return $this.EndDate - $this.CreatedAt
+        }
+      )
+    )
   }
   ChatSession([string]$name) {
     [void][ChatSession]::_Create([ref]$this, $name)
   }
   static ChatSession() {
     foreach ($Definition in [ChatSession]::MemberDefinitions) {
-      Update-TypeData -TypeName ([ChatSession].Name) @Definition
+      if (!(Get-TypeData ChatSession).Members.keys.contains($Definition.MemberName)) {
+        Update-TypeData -TypeName ([ChatSession].Name) @Definition
+      }
     }
   }
   static [ChatSession] Create() {
@@ -1009,7 +1004,7 @@ You:
 "@
         FirstMessage   = "Hi, can you introduce yourself in one sentence?"
         OfflineNoAns   = " Sorry, I can't understand what that was! Fix the problem or try again. More info in [Gemini].vars.Error"
-        NoApiKeyHelp   = 'Get your Gemini API key: https://aistudio.google.com/. Read docs: https://ai.google.dev/gemini-api/docs/api-key'
+        NoApiKeyHelp   = 'Get your Gemini API key: https://aistudio.google.com/app/apikey Read docs: https://ai.google.dev/gemini-api/docs/api-key'
         LogOfflineErr  = $false # If true then chatlogs will include results like OfflineNoAns.
         ThrowNoApiKey  = $false # If false then Chat() will go in offlineMode when no api key is provided, otherwise it will throw an error and exit.
         UsageHelp      = "Usage:`nHere's an example of how to use this bot:`n   `$bot = [Gemini]::new()`n   `$bot.Chat()`n`nAnd make sure you have Internet."
@@ -1209,8 +1204,8 @@ You:
     $ogxc = [Gemini].vars.ExitCode;
     [Gemini].vars.set('ExitCode', 1)
     do {
-      if ($rc -gt 0) { Write-AnimatedHost ([Gemini].client.Config.NoApiKeyHelp + "`n") -f Green; $p = "Paste your Gemini API key: " }
-      Write-AnimatedHost $p; Set-Variable -Name ApiKey -Scope local -Visibility Private -Option Private -Value ((Get-Variable host).Value.UI.ReadLineAsSecureString());
+      if ($rc -gt 0) { Write-Console ([Gemini].client.Config.NoApiKeyHelp + "`n") -f LimeGreen; $p = "Paste your Gemini API key: " }
+      Write-Console $p -f White -Animate -NoNewLine; Set-Variable -Name ApiKey -Scope local -Visibility Private -Option Private -Value ((Get-Variable host).Value.UI.ReadLineAsSecureString());
       $rc ++
     } while ([string]::IsNullOrWhiteSpace([xconvert]::ToString($ApiKey)) -and $rc -lt 2)
     [Gemini].vars.set('OfflineMode', $true)
@@ -1222,7 +1217,7 @@ You:
     }
     if ([Gemini]::IsInteractive()) {
       # Ask the user to save API key or not:
-      Write-AnimatedHost '++  '; Write-Host 'Encrypt and Save the API key' -f Green -NoNewline; Write-AnimatedHost "  ++`n";
+      Write-Console '++  ' -Animate -f White; Write-Console 'Encrypt and Save the API key' -f LimeGreen -NoNewLine; Write-Console "  ++`n" -f White;
       $answer = (Get-Variable host).Value.UI.PromptForChoice(
         '', '       Encrypt and save Gemini API key on local drive?',
         [System.Management.Automation.Host.ChoiceDescription[]](
@@ -1236,9 +1231,9 @@ You:
         [Gemini]::SaveApiKey($ApiKey, [Gemini].vars.ApiKey_Path, $Pass)
         [Gemini].vars.set('OfflineMode', $false)
       } elseif ($answer -eq 1) {
-        Write-AnimatedHost "API key not saved`n." -f DarkYellow
+        Write-Console "API key not saved`n." -f DarkYellow
       } else {
-        Write-AnimatedHost "Invalid answer.`n" -f Red
+        Write-Console "Invalid answer.`n" -f Red
       }
     } else {
       # save without asking :)
@@ -1251,9 +1246,9 @@ You:
       Throw [FileNotFoundException]::new("Please set a valid ApiKey_Path first", $FilePath)
     }
     #--todo: use hash hkdf
-    Write-Host "Saving API key to $([IO.Fileinfo]::New($FilePath).FullName) ..." -f Green -NoNewline;
+    Write-Console "Saving API key to $([IO.Fileinfo]::New($FilePath).FullName) ..." -f LimeGreen -NoNewLine;
     [IO.File]::WriteAllText($FilePath, [convert]::ToBase64String([AesGCM]::Encrypt([System.Text.Encoding]::UTF8.GetBytes([xconvert]::ToString($ApiKey)), $password)), [System.Text.Encoding]::UTF8)
-    Write-AnimatedHost 'API key saved in'; Write-Host " $FilePath" -f Green -NoNewline;
+    Write-Console 'API key saved in' -Animate -NoNewLine; Write-Host " $FilePath" -f LimeGreen -NoNewline;
   }
   hidden [string] Get_ApiKey_Path([string]$fileName) {
     $DataPath = $this.Config.Bot_data_Path; if (![IO.Directory]::Exists($DataPath)) { [Gemini]::Create_Dir($DataPath) }
@@ -1277,7 +1272,7 @@ You:
       }
     }
     $usage_str = ([Gemini].client.Config.ShowTokenUsage -and $usage) ? ("TokenUsage: in_tk={0}, out_tk={1}, total_cost={2}" -f $usage.InputTokens, $usage.OutputTokens, [ModelClient]::FormatCost(($usage.OutputCost + $usage.InputCost))) : $null
-    Write-Host "$usage_str`n" -f Green
+    Write-Host "$usage_str`n" -ForegroundColor Green
     return $usage
   }
   static [TokenUsage] GetTokenUsage([Model]$model, [string]$inputText, [string]$outputText) {
@@ -1295,7 +1290,7 @@ You:
     try {
       $res = Invoke-WebRequest -Method Get -Uri "https://generativelanguage.googleapis.com/v1beta/models?key=$key" -Verbose:$false
       $_sc = $res.StatusCode; if ($_sc -ne 200) { throw [LlmException]::new("GetModels Failed: $($res.StatusDescription)", [int]($_sc ? $_sc : 501)) }
-      Write-Host "GetModels Result: $_sc, $($res.StatusDescription)" -f Green
+      Write-Console "GetModels Result: $_sc, $($res.StatusDescription)" -f LimeGreen
     } catch {
       $exc = ($_.ErrorDetails.Message ? $($e = ($_.ErrorDetails.Message | ConvertFrom-Json).error; [LlmException]::new($e.message, [int]$e.code)) : $_)
       throw $exc
@@ -1459,10 +1454,10 @@ class Gemini : ModelClient {
       $LAST_MSG = [Gemini].Client.Session.History.Messages[-1]
       if ([Gemini]::HasContext() -and ![Gemini].vars.ChatIsActive -and $LAST_MSG.Role -eq "Assistant") {
         Write-Verbose "Resuming Chat"
-        Write-AnimatedHost $("{0}{1}" -f [Gemini].vars.Emojis.Bot, $LAST_MSG.Content.parts[0].text) | Out-Null
+        Write-Console -Text $("{0}{1}" -f [Gemini].vars.Emojis.Bot, $LAST_MSG.Content.parts[0].text) -f White -Animate | Out-Null
         switch ([FinishReason][Gemini].vars.FinishReason) {
           'NO_INTERNET' {
-            # if (![Gemini].client.IsOffline) { Write-Host "Connected!" -f Green }
+            # if (![Gemini].client.IsOffline) { Write-Console "Connected!" -f LimeGreen }
           }
           'FAILED_HTTP_REQUEST' {
             Write-Verbose 'Resume completed, FinishReason: The request failed due to an HTTP error.'
@@ -1620,13 +1615,11 @@ class Gemini : ModelClient {
     $npt = [string]::Empty; $OgctrInput = [Console]::TreatControlCAsInput;
     [void][Console]::WriteLine(); if (![console]::KeyAvailable) { [Console]::TreatControlCAsInput = $true } #Treat Ctrl key as normal Input
     while ([string]::IsNullOrWhiteSpace($npt) -and [Gemini].vars.ChatIsActive) {
-      Write-AnimatedHost ([Gemini].vars.emojis.user) -f Green
+      Write-Console ([Gemini].vars.emojis.user) -f LimeGreen -Animate -NoNewLine
       $key = [Console]::ReadKey($false)
       if (($key.modifiers -band [consolemodifiers]::Control) -and ($key.key -eq 'q' -or $key.key -eq 'c')) {
         Write-Debug "$(Get-Date -f 'yyyyMMdd HH:mm:ss') Closed by user exit command`n" -Debug
-        [Gemini].vars.set('FinishReason', 'USER_CANCELED')
-        [Console]::TreatControlCAsInput = $OgctrInput
-        [Gemini].vars.set('ChatIsActive', $false)
+        [Gemini]::EndSession('USER_CANCELED')
         $npt = [string]::Empty
       } else {
         [console]::CancelKeyPress
@@ -1652,9 +1645,8 @@ class Gemini : ModelClient {
   }
   static [void] GetResponse([hashtable]$RequestParams, [string]$progressmsg) {
     $res = $null; $out = $null; [ValidateNotNullOrEmpty()][hashtable]$RequestParams = $RequestParams
-    $t = New-TemporaryFile; $RequestParams | ConvertTo-Json -Depth 100 > $t
     try {
-      [ChatResponse]$res = [ProgressUtil]::WaitJob($progressmsg, [scriptblock]::Create("`$p =  [IO.File]::ReadAllText(`"$t`") | ConvertFrom-Json | xconvert ToHashTable; Invoke-RestMethod @p")) | Receive-Job
+      [ChatResponse]$res = cliHelper.core\Wait-Task $progressmsg { Param([hashtable]$p) return Invoke-RestMethod @p } $RequestParams
       if ($null -ne $res.candidates) {
         $out = $res.candidates.content.parts.text; $IsaThinkingModel = [Gemini].client.Model.name -like "*thinking*"
         [Gemini].vars.set(@{
@@ -1665,11 +1657,11 @@ class Gemini : ModelClient {
       }
       [Gemini]::AddTokenUsage([Gemini]::GetTokenUsage($res))
     } catch [System.Net.Sockets.SocketException] {
-      if (![Gemini].vars.OfflineMode) { Write-AnimatedHost "$([Gemini].vars.Emojis.Bot) $($_.exception.message)`n" -f Red }
-      [Gemini].vars.set('FinishReason', 'NO_INTERNET'); [Gemini].vars.set('ChatIsActive', $false)
+      if (![Gemini].vars.OfflineMode) { Write-Console "$([Gemini].vars.Emojis.Bot) $($_.exception.message)`n" -f Red -Animate }
+      [Gemini]::EndSession('NO_INTERNET')
     } catch {
-      if (![Gemini].vars.OfflineMode) { Write-AnimatedHost "$([Gemini].vars.Emojis.Bot) $($_.exception.message)`n" -f Red }
-      [Gemini].vars.set('ChatIsActive', $false);
+      if (![Gemini].vars.OfflineMode) { Write-Console "$([Gemini].vars.Emojis.Bot) $($_.exception.message)`n" -f Red -Animate }
+      [Gemini]::EndSession('FAILED_HTTP_REQUEST')
     } finally {
       # Prevent the API key from being logged
       $PREVIOUS_ERR = (Get-Error)[0]
@@ -1686,12 +1678,11 @@ class Gemini : ModelClient {
         [Gemini].vars.Set('Error', $PREVIOUS_ERR.ErrorDetails)
         [Gemini].vars.Set('FinishReason', 'FAILED_HTTP_REQUEST')
       }
-      Remove-Item $t -Force -ea Ignore
       if ($null -ne $res.candidates) { [Gemini].vars.set('FinishReason', $res.candidates[0].finishReason) }
       [Gemini].vars.set('OfflineMode', (!$res -or [Gemini].vars.FinishReason -in ('NO_INTERNET', 'EMPTY_API_KEY')))
     }
     if ([string]::IsNullOrWhiteSpace([Gemini].vars.Response)) { [Gemini].vars.set('Response', [Gemini].client.Config.OfflineNoAns) }
-    Write-AnimatedHost $("{0}{1}" -f [Gemini].vars.Emojis.Bot, [Gemini].vars.Response) | Out-Null
+    Write-Console -Animate -f White -Text $("{0}{1}" -f [Gemini].vars.Emojis.Bot, [Gemini].vars.Response) | Out-Null
   }
   static [void] RecordChat() {
     $RecdOfflnAns = ([Gemini].vars.OfflineMode -or [Gemini].vars.Response -eq [Gemini].client.Config.OfflineNoAns) -and [Gemini].client.Config.LogOfflineErr
@@ -1718,9 +1709,9 @@ class Gemini : ModelClient {
     if ([bool]$c) {
       $CommandName = $c.ResolvedCommandName
       $Description = $c | Format-List * -Force | Out-String
-      Write-AnimatedHost "Do you mean $CommandName ?`n" -f Green;
-      Write-AnimatedHost $Description -f Green;
-      Write-AnimatedHost "Run Command?" -f Green;
+      Write-Console "Do you mean $CommandName ?`n" -f LimeGreen -Animate;
+      Write-Console $Description -f LimeGreen;
+      Write-Console "Run Command?" -f LimeGreen -Animate;
       $answer = (Get-Variable host).Value.UI.PromptForChoice(
         '', 'Run the command or send a gemini Query.',
         [System.Management.Automation.Host.ChoiceDescription[]](
@@ -1730,12 +1721,12 @@ class Gemini : ModelClient {
         0
       )
       if ($answer -eq 0) {
-        Write-AnimatedHost "Running the command ...`n" -f Green;
+        Write-Console "Running the command ...`n" -f LimeGreen;
         $resp = & $c
       } elseif ($answer -eq 1) {
-        Write-AnimatedHost "Ok, so this was a normal gemini query.`n" -f Blue;
+        Write-Console "Ok, so this was a normal gemini query.`n" -f Blue;
       } else {
-        Write-AnimatedHost "Ok, I aint do shit about it.`n" -f DarkYellow
+        Write-Console "Ok, I aint do shit about it.`n" -f DarkYellow
       }
     }
     return $resp
@@ -1749,6 +1740,11 @@ class Gemini : ModelClient {
     Write-Host "Use Ctrl+<anykey> to pause the chat and Ctrl+Q to exit."
     # other code for menu goes here ...
   }
+  static [void] EndSession([FinishReason]$Reason) {
+    [Gemini].vars.set('FinishReason', $Reason);
+    [Gemini].vars.set('ChatIsActive', $false)
+    [Gemini].client.session.EndDate = [datetime]::Now
+  }
   hidden [void] Exit() {
     [Gemini].client.Exit($false);
   }
@@ -1759,11 +1755,11 @@ class Gemini : ModelClient {
     $(Get-Variable executionContext).Value.Host.UI.RawUI.WindowTitle = [Gemini].vars.OgWindowTitle
     [Gemini].vars.set('Query', 'exit'); [Gemini].Client.Session.ChatLog.SetMessage([Gemini].vars.Query);
     if ([Gemini].vars.Use_Quick_Exit) {
-      [Gemini].vars.set('Response', ( Write-AnimatedHost $ExitMsg)); return
+      [Gemini].vars.set('Response', (Write-Console $ExitMsg -f White -PassThru)); return
     }
     $cResp = 'Do you mean Close chat?'
-    Write-AnimatedHost '++  '; Write-Host 'Close this chat session' -f Green -NoNewline; Write-AnimatedHost "  ++`n";
-    Write-AnimatedHost "    $cResp`n"; [Gemini].Client.Session.ChatLog.SetResponse($cResp);
+    Write-Console '++  ' -f White -Animate; Write-Host 'Close this chat session' -f LimeGreen -NoNewline; Write-Console "  ++`n" -f White -Animate;
+    Write-Console "    $cResp`n" -f White; [Gemini].Client.Session.ChatLog.SetResponse($cResp);
     $answer = (Get-Variable host).Value.UI.PromptForChoice(
       '', [Gemini].vars.Response,
       [System.Management.Automation.Host.ChoiceDescription[]](
@@ -1775,14 +1771,14 @@ class Gemini : ModelClient {
     Write-Debug "Checking answers ..."
     if ($answer -eq 0) {
       [Gemini].vars.set('Query', 'yes')
-      [Gemini]::RecordChat(); [Gemini].Client.Session.ChatLog.SetResponse((Write-AnimatedHost $ExitMsg));
-      [Gemini].vars.set('ChatIsActive', $false)
+      [Gemini]::RecordChat(); [Gemini].Client.Session.ChatLog.SetResponse((Write-Console $ExitMsg -f White -PassThru));
+      [Gemini]::EndSession('STOP')
       [Gemini].vars.set('ExitCode', 0)
     } else {
       [Gemini]::RecordChat();
       [Gemini].Client.Session.ChatLog.SetMessage('no');
-      [Gemini].Client.Session.ChatLog.SetResponse((Write-AnimatedHost "Okay; then I'm here to help If you need anything."));
-      [Gemini].vars.set('ChatIsActive', $true)
+      [Gemini].Client.Session.ChatLog.SetResponse((Write-Console "Okay; then I'm here to help If you need anything." -f White));
+      [Gemini]::EndSession('STOP')
     }
     [Gemini].vars.set('Query', ''); [Gemini].vars.set('Response', '')
     if ($cleanUp) {

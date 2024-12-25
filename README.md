@@ -6,8 +6,8 @@ PowerShell module for google 's Gemini.
 
 ```PowerShell
 Import-Module cliHelper.gemini
-$bot = [Gemini]::new()
-$bot.Chat()
+$g = [Gemini]::new()
+$g.Chat()
 ```
 
 then
@@ -19,25 +19,23 @@ then
 https://github.com/user-attachments/assets/f0f36752-6a61-4bf0-9bd6-b3ee3906308e
 
 ❯ Note.: The goal of this module is not to be a chatbot, rather it's to provide
-cmdlets that brings the power of google's gemini to other modules. Example:
-generating names, tags, etc.
+cmdlets that brings the power of google gemini to other modules. Example:
+generating fileContents, Names, etc.
 
 ❯ For more usage read the [docs](/docs/Readme.md). Its straightforward!
 
 #### Features : Work in progress
 
 - [x] Chat()
-  - [x] get response works fine.
-    - [ ] fix security concern🚨: request params can get left in a tmp file when
-          error occurs. potential solution: use
-          [memory stream](https://docs.microsoft.com/en-us/dotnet/api/system.io.memorystream?view=net-6.0)
-          or just encrypt them.
+  - [x] Get response works fine.
   - [x] TokenUsage & estimation
   - [ ] GetOfflineResponse()
-  - [ ] Custom resume actions based on [FinishReason]
+  - [x] Custom resume actions based on [FinishReason]
 - [ ] Public functions
-- [ ] 🔥 cool feature.
-- [ ] 🔥 another one.
+  - [x] Get-GeminiModels
+  - [ ] Get-GeminiTokenUsage
+- [ ] Private functions
+  - [ ] Invoke-GeminiRequest
 
 ## License
 

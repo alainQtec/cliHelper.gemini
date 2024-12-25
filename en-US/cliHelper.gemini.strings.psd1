@@ -8,10 +8,14 @@
 
 ### New Features
 
-- Added feature abc.
-- Added feature defg.
+- Gemini Chat() complete.
+  - Added Get response works fine.
+  - Added TokenUsage & estimation
+  - Added Custom resume actions based on [FinishReason]
+- Added Public functions
+- Added Private functions
+## BUG fIXES
 
-## Changelog
-
+- Fixed security concern: request params could get left in a tmp file when error occurs. Used new Wait-Task syntax.
   >...'
 }
