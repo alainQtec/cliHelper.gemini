@@ -1178,8 +1178,8 @@ You:
     [Gemini]::RecordChat()
   }
   static [string] GetAPIkey() {
-    if ([string]::IsNullOrWhiteSpace($env:GEMINI_API_KEY)) { Set-Env -source .env -ea Ignore -Scope User }
-    $key = $env:GEMINI_API_KEY; [ValidateNotNullOrWhiteSpace()][string]$key = $key
+    Set-Env -source .env -ea Ignore -Scope User; $key = $env:GEMINI_API_KEY;
+    if ([string]::IsNullOrWhiteSpace($key)) { throw [LlmConfigException]::new('Failed to set $env:GEMINI_API_KEY.') }
     return $key
   }
   static [securestring] GetAPIkey([securestring]$Password) {
